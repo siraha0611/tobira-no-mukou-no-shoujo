@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>扉のむこうの少女</title>
+<style>
+  :root{
+    --ink:#e9e4d8; --dim:#7d7668; --faint:#46443e; --gold:#c9a86a;
+    --warm:#e8c98a; --panel:#14131a; --line:#2c2a33;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:radial-gradient(120% 90% at 50% 18%,#14131a,#0a0a10 55%,#050509);
+    color:var(--ink);font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+    overflow:hidden;
+  }
+
+  /* ── 扉と舞台 ─────────────────────────────── */
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;transition:background 2.5s}
+  #door{position:absolute;top:46%;left:50%;transform:translate(-50%,-50%);
+    width:min(44vw,300px);height:min(64vh,500px);
+    border:1px solid #2a2620;border-radius:6px 6px 0 0;
+    background:linear-gradient(180deg,#100f14,#0b0a0f);
+    box-shadow:0 0 0 1px #000 inset,0 30px 80px rgba(0,0,0,.6);
+    transition:filter 2.5s,opacity 2s,transform 2.5s}
+  #door::before{ /* 扉のすきまの光 = おもいでの灯 */
+    content:"";position:absolute;top:8%;bottom:0;left:50%;width:2px;transform:translateX(-50%);
+    background:linear-gradient(180deg,transparent,rgba(244,236,216,.05),transparent);
+    transition:background 2.5s,box-shadow 2.5s}
+  #figure{ /* stage3〜 かすかな人影 */
+    position:absolute;bottom:0;left:50%;transform:translateX(-50%);
+    width:34%;height:46%;border-radius:50% 50% 0 0;
+    background:radial-gradient(60% 80% at 50% 30%,rgba(244,236,216,.10),transparent 75%);
+    opacity:0;transition:opacity 3s;filter:blur(6px)}
+  body[data-beat="1"] #door::before{background:linear-gradient(180deg,transparent,rgba(244,236,216,.14),transparent)}
+  body[data-beat="2"] #door::before{background:linear-gradient(180deg,transparent,rgba(244,236,216,.26),transparent);box-shadow:0 0 18px rgba(244,236,216,.08)}
+  body[data-beat="3"] #door::before{background:linear-gradient(180deg,transparent,rgba(232,201,138,.38),transparent);box-shadow:0 0 28px rgba(232,201,138,.14)}
+  body[data-beat="3"] #figure{opacity:.5}
+  body[data-beat="4"] #door::before{background:linear-gradient(180deg,transparent,rgba(232,201,138,.52),transparent);box-shadow:0 0 40px rgba(232,201,138,.2)}
+  body[data-beat="4"] #figure{opacity:.75}
+  body[data-beat="5"] #door::before{background:linear-gradient(180deg,transparent,rgba(201,168,106,.7),transparent);box-shadow:0 0 56px rgba(201,168,106,.3)}
+  body[data-beat="5"] #figure{opacity:.9}
+  body[data-mood="lonely"] #door::before,body[data-mood="unease"] #door::before{filter:saturate(.4) brightness(.8)}
+  body[data-mood="joy"] #door::before,body[data-mood="farewell"] #door::before{filter:saturate(1.2) brightness(1.15)}
+  body.open #stage{background:radial-gradient(60% 60% at 50% 46%,rgba(244,236,216,.85),transparent 70%)}
+  body.open #door{filter:brightness(2.4);transform:translate(-50%,-50%) scaleX(.05);opacity:0}
+  body.open #figure{opacity:0}
+
+  /* ── せりふ(中央字幕) ─────────────────────── */
+  #panel{position:fixed;left:0;right:0;top:54%;z-index:3;display:flex;flex-direction:column;align-items:center;pointer-events:none;padding:0 5vw}
+  #kp{font-size:clamp(17px,2.6vw,25px);line-height:2;letter-spacing:.05em;text-align:center;
+    min-height:3.6em;display:flex;align-items:center;justify-content:center;
+    text-shadow:0 1px 30px rgba(0,0,0,.9);opacity:0;transition:opacity .8s}
+  #kp.show{opacity:1}
+  #thinking{color:var(--dim);font-size:12px;letter-spacing:.22em;opacity:0;transition:opacity .6s;margin-top:6px}
+  #thinking.show{opacity:.9;animation:breathe 2.2s ease-in-out infinite}
+  @keyframes breathe{50%{opacity:.35}}
+
+  /* ── 上部バー: タイトル/おもいで/メニュー ────── */
+  #topbar{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;justify-content:space-between;
+    padding:12px 16px;gap:10px}
+  #brand{font-size:12px;letter-spacing:.18em;color:var(--faint);white-space:nowrap}
+  #brand b{display:block;color:#8d8678;font-weight:400;font-size:13px;letter-spacing:.3em}
+  #memory{display:flex;flex-direction:column;align-items:center;gap:5px}
+  #memory .label{font-size:10px;letter-spacing:.4em;color:var(--faint)}
+  #dots{display:flex;gap:10px}
+  .dot{width:9px;height:9px;border-radius:50%;border:1px solid #4a463c;background:transparent;transition:all 1.2s}
+  .dot.lit{background:var(--warm);border-color:var(--warm);box-shadow:0 0 10px rgba(232,201,138,.55)}
+  #menu{display:flex;gap:8px;align-items:center}
+  .iconbtn{font-family:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);
+    background:rgba(20,18,26,.85);color:var(--dim);padding:7px 11px;font-size:13px;transition:.2s}
+  .iconbtn:hover,.iconbtn.on{border-color:var(--gold);color:var(--ink)}
+
+  /* ── 入力まわり ───────────────────────────── */
+  #controls{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;flex-direction:column;align-items:center;
+    gap:10px;padding:14px 16px calc(20px + env(safe-area-inset-bottom))}
+  #controls.hidden{opacity:0;pointer-events:none}
+  #controls{transition:opacity .5s}
+  #chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:min(92vw,640px)}
+  .chip{font-family:inherit;cursor:pointer;font-size:12px;color:#9a9384;background:rgba(15,14,20,.7);
+    border:1px solid var(--line);border-radius:20px;padding:7px 14px;transition:.2s;letter-spacing:.04em}
+  .chip:hover{border-color:var(--gold);color:var(--ink)}
+  #row{display:flex;gap:9px;width:min(92vw,620px)}
+  #say{flex:1;background:rgba(15,14,20,.88);border:1px solid var(--line);color:var(--ink);
+    font-family:inherit;font-size:16px;padding:13px 18px;border-radius:30px;outline:none;transition:border .2s}
+  #say:focus{border-color:#56503f}
+  #say::placeholder{color:#54505c}
+  button{font-family:inherit;cursor:pointer}
+  .pill{border-radius:30px;border:1px solid var(--line);background:rgba(20,18,26,.9);
+    color:var(--ink);padding:13px 18px;font-size:15px;transition:.2s;white-space:nowrap}
+  .pill:hover{border-color:var(--gold)}
+  .pill:disabled{opacity:.4;cursor:default}
+  #mic.live{border-color:#d98;color:#f5cdbd;box-shadow:0 0 18px rgba(217,140,120,.35);animation:pulse 1.6s infinite}
+  @keyframes pulse{50%{box-shadow:0 0 6px rgba(217,140,120,.15)}}
+  #subrow{display:flex;gap:14px;align-items:center}
+  #silent{font-size:12px;color:var(--dim);background:none;border:none;letter-spacing:.1em;padding:4px}
+  #silent:hover{color:var(--ink)}
+  #hint{color:var(--dim);font-size:12px;letter-spacing:.08em;min-height:16px;text-align:center}
+
+  /* ── ことばの記録(ログ) ───────────────────── */
+  #log{position:fixed;top:0;right:0;bottom:0;width:min(86vw,340px);z-index:20;background:rgba(10,10,15,.96);
+    border-left:1px solid var(--line);transform:translateX(102%);transition:transform .4s;display:flex;flex-direction:column}
+  #log.open{transform:none}
+  #log header{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid #1c1a22}
+  #log header span{font-size:13px;letter-spacing:.3em;color:#8d8678}
+  #logbody{flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:14px}
+  .turn .who{font-size:10px;letter-spacing:.3em;color:var(--faint);margin-bottom:4px}
+  .turn .what{font-size:13px;line-height:1.9;color:#cfc9bb;white-space:pre-wrap}
+  .turn.you .what{color:#9a9384}
+
+  /* ── 設定ポップ ───────────────────────────── */
+  #settings{position:fixed;top:54px;right:14px;z-index:25;background:rgba(12,11,17,.97);border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;display:none;flex-direction:column;gap:14px;min-width:230px}
+  #settings.open{display:flex}
+  #settings .opt{display:flex;justify-content:space-between;align-items:center;gap:14px;font-size:13px;color:#bdb7a9}
+  #settings input[type=range]{width:110px;accent-color:var(--gold)}
+  .switch{cursor:pointer;border:1px solid var(--line);border-radius:16px;padding:3px 10px;font-size:12px;background:none;color:var(--dim)}
+  .switch.on{color:var(--warm);border-color:var(--warm)}
+
+  /* ── オーバーレイ(導入/結び) ───────────────── */
+  .overlay{position:fixed;inset:0;z-index:30;background:#050509;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:26px;transition:opacity 1.4s;padding:6vh 8vw;text-align:center;overflow-y:auto}
+  .overlay.gone{opacity:0;pointer-events:none}
+  #intro h1{font-size:clamp(24px,4.4vw,36px);letter-spacing:.3em;font-weight:400;color:#d8d2c4;text-indent:.3em}
+  #intro .lead{color:#8d8678;letter-spacing:.12em;font-size:14px;line-height:2.4}
+  #steps{display:flex;flex-direction:column;gap:10px;align-items:flex-start;margin:4px auto}
+  #steps div{color:#9a9384;font-size:13px;letter-spacing:.1em;line-height:1.9}
+  #steps b{color:var(--warm);font-weight:400;margin-right:10px}
+  .meta{color:var(--faint);font-size:11.5px;letter-spacing:.14em;line-height:2.2}
+  #enter{padding:16px 46px;letter-spacing:.26em;border:1px solid #3a3630;background:transparent;color:var(--ink);
+    border-radius:30px;font-size:15px;transition:.3s;text-indent:.26em}
+  #enter:hover{border-color:var(--gold);box-shadow:0 0 24px rgba(201,168,106,.15)}
+  #enter:disabled{opacity:.5}
+  #caps{color:var(--faint);font-size:11px;letter-spacing:.1em;line-height:2;min-height:2em}
+  #caps .warn{color:#a08a5a}
+
+  #fin{display:none}
+  #fin.show{display:flex}
+  #fin .name{font-size:clamp(26px,5vw,40px);letter-spacing:.4em;color:#e8dfc8;text-indent:.4em}
+  #fin .yomi{color:var(--faint);letter-spacing:.5em;font-size:12px;margin-top:-14px}
+  #fin p{color:#8d8678;font-size:13.5px;letter-spacing:.14em;line-height:2.6}
+  #fin .btns{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+
+  @media (max-width:640px){
+    #brand{display:none}
+    #door{width:62vw;top:42%}
+    #panel{top:56%}
+    #chips .chip:nth-child(3){display:none}
+  }
+</style>
+</head>
+<body data-beat="0" data-mood="calm">
+
+  <div id="stage"><div id="door"><div id="figure"></div></div></div>
+
+  <div id="topbar">
+    <div id="brand"><b>扉のむこうの少女</b><span id="engineline"></span></div>
+    <div id="memory" title="彼女が思い出すと、灯がともります">
+      <div id="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      <div class="label">おもいで</div>
+    </div>
+    <div id="menu">
+      <button class="iconbtn" id="logbtn" title="ことばの記録">📖 記録</button>
+      <button class="iconbtn" id="setbtn" title="設定">⚙</button>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div id="kp" aria-live="polite"></div>
+    <div id="thinking">（ことばを、たべている……）</div>
+  </div>
+
+  <div id="controls" class="hidden">
+    <div id="hint"></div>
+    <div id="chips" title="話すことに迷ったら"></div>
+    <div id="row">
+      <input id="say" type="text" placeholder="扉のむこうへ、話しかける" autocomplete="off" maxlength="300">
+      <button class="pill" id="mic" title="声で話す">🎙</button>
+      <button class="pill" id="send">送る</button>
+    </div>
+    <div id="subrow"><button id="silent" title="何も言わずに、そこにいる">……だまって、そこにいる</button></div>
+  </div>
+
+  <aside id="log" aria-label="ことばの記録">
+    <header><span>ことばの記録</span><button class="iconbtn" id="logclose">✕</button></header>
+    <div id="logbody"></div>
+  </aside>
+
+  <div id="settings">
+    <div class="opt"><span>こえの大きさ</span><input id="vol" type="range" min="0" max="100" value="90"></div>
+    <div class="opt"><span>こえ</span><button class="switch on" id="voicesw">ON</button></div>
+    <div class="opt"><span>字幕の速さ</span><button class="switch" id="speedsw">ふつう</button></div>
+  </div>
+
+  <div class="overlay" id="intro">
+    <h1>扉のむこうの少女</h1>
+    <p class="lead">暗がりに、ふるい扉がひとつ。<br>むこうから、小さな声がします。</p>
+    <div id="steps">
+      <div><b>一、</b>扉の前に立つ</div>
+      <div><b>二、</b>なんでもいい、話しかける（声でも、文字でも）</div>
+      <div><b>三、</b>彼女が思い出せたら——扉は、ひらく</div>
+    </div>
+    <p class="meta">所要 15〜20分 ／ ヘッドホン推奨 ／ こわい演出はありません</p>
+    <button id="enter">扉の前に立つ</button>
+    <div id="caps">……</div>
+  </div>
+
+  <div class="overlay gone" id="fin">
+    <div class="name">琴 葉</div>
+    <div class="yomi">ことは</div>
+    <p>ことばと、ひと文字ちがいの名前。<br>あなたのことばが、彼女を連れて帰りました。</p>
+    <div class="btns">
+      <button id="replay" class="pill">もういちど、扉の前へ</button>
+      <button id="finlog" class="pill">ことばの記録を読む</button>
+    </div>
+    <p class="meta">『扉のむこうの少女』</p>
+  </div>
+
+<script>
+const $=id=>document.getElementById(id);
+const kp=$('kp'), hint=$('hint'), sayEl=$('say'), micBtn=$('mic'), thinking=$('thinking');
+let sessionId=null, busy=false, done=false, caps={}, girlName='扉のむこう';
+let audioUnlocked=false, currentAudio=null;
+
+/* ── 設定(永続化) ── */
+const store={get:(k,d)=>{const v=localStorage.getItem('door_'+k);return v===null?d:JSON.parse(v)},
+             set:(k,v)=>localStorage.setItem('door_'+k,JSON.stringify(v))};
+let volume=store.get('vol',0.9), voiceOn=store.get('voice',true), fastText=store.get('fast',false);
+$('vol').value=Math.round(volume*100);
+$('vol').oninput=e=>{volume=e.target.value/100;store.set('vol',volume);if(currentAudio)try{currentAudio.volume=volume}catch(_){}};
+const voicesw=$('voicesw');
+function paintVoiceSw(){voicesw.textContent=voiceOn?'ON':'OFF';voicesw.classList.toggle('on',voiceOn)}
+voicesw.onclick=()=>{voiceOn=!voiceOn;store.set('voice',voiceOn);paintVoiceSw()};paintVoiceSw();
+const speedsw=$('speedsw');
+function paintSpeedSw(){speedsw.textContent=fastText?'はやい':'ふつう';speedsw.classList.toggle('on',fastText)}
+speedsw.onclick=()=>{fastText=!fastText;store.set('fast',fastText);paintSpeedSw()};paintSpeedSw();
+$('setbtn').onclick=()=>$('settings').classList.toggle('open');
+document.addEventListener('click',e=>{if(!$('settings').contains(e.target)&&e.target.id!=='setbtn')$('settings').classList.remove('open')});
+
+/* ── ことばの記録 ── */
+const logBody=$('logbody');
+function addLog(who,text){
+  if(!text)return;
+  const d=document.createElement('div');d.className='turn'+(who==='you'?' you':'');
+  d.innerHTML='<div class="who"></div><div class="what"></div>';
+  d.querySelector('.who').textContent=who==='you'?'あなた':girlName;
+  d.querySelector('.what').textContent=text;
+  logBody.appendChild(d);logBody.scrollTop=logBody.scrollHeight;
+}
+$('logbtn').onclick=()=>$('log').classList.toggle('open');
+$('logclose').onclick=()=>$('log').classList.remove('open');
+
+/* ── 話題のヒント(チップ) ── */
+const CHIP_POOL=[
+  'こんにちは。きこえますか?','今日ね、こんなことがあって——','すきな食べものの話、しようか',
+  '夏のおもいで、ある?','あなたのこと、おしえて','いま、どんな気持ち?',
+  'わたしの名前はね——','雨の日って、すき?','学校って、行ってた?',
+  'すきな言葉、ある?','そっちは、どんなところ?','最近うれしかったこと、話すね'
+];
+function refreshChips(){
+  const box=$('chips');box.innerHTML='';
+  const pool=[...CHIP_POOL];
+  for(let i=0;i<3&&pool.length;i++){
+    const t=pool.splice(Math.floor(Math.random()*pool.length),1)[0];
+    const b=document.createElement('button');b.className='chip';b.textContent=t;
+    b.onclick=()=>{sayEl.value=t.replace(/——$/,'');sayEl.focus()};
+    box.appendChild(b);
+  }
+}
+
+/* ── 演出ヘルパ ── */
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function setKP(t){kp.classList.remove('show');return new Promise(r=>setTimeout(()=>{kp.textContent=t;kp.classList.add('show');r()},320))}
+function setBeat(n){document.body.setAttribute('data-beat',String(Math.max(0,Math.min(n,5))))}
+function setMood(m){document.body.setAttribute('data-mood',m||'calm')}
+function setDots(n){document.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('lit',i<n))}
+function showThinking(b){thinking.classList.toggle('show',b)}
+
+function playAudio(url){
+  return new Promise(res=>{
+    if(!url||!voiceOn){res();return}
+    const a=new Audio(url);a.volume=volume;currentAudio=a;
+    let fin=false;const end=()=>{if(!fin){fin=true;currentAudio=null;res()}};
+    a.onended=end;a.onerror=end;a.play().catch(end);setTimeout(end,60000);
+  });
+}
+async function unlock(){
+  if(audioUnlocked)return;audioUnlocked=true;
+  try{const s=new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=');s.volume=.01;await s.play().catch(()=>{})}catch(_){}
+}
+
+const PAUSE=460;
+async function present(d){
+  if(d.stage!=null){setBeat(d.stage);setDots(d.stage)}
+  if(d.mood)setMood(d.mood);
+  if(d.opened)document.body.classList.add('open');
+  const segs=(d.segments&&d.segments.length)?d.segments:[{text:d.narration||'',audio:null}];
+  for(let i=0;i<segs.length;i++){
+    await Promise.all([setKP(segs[i].text),playAudio(segs[i].audio)]);
+    if(!segs[i].audio)await sleep(fastText?200:300+segs[i].text.length*70);
+    if(i<segs.length-1)await sleep(fastText?200:PAUSE);
+  }
+  addLog('girl',d.narration);
+}
+
+/* ── 開始 ── */
+async function loadCaps(){
+  try{
+    caps=await (await fetch('/health')).json();
+    const line=[];
+    line.push(caps.engine==='claude'?'会話: Claude':'<span class="warn">体験モード(APIキー未設定・台本進行)</span>');
+    line.push(caps.tts?'声: あり':'声: なし(字幕のみ)');
+    line.push(caps.stt?'マイク: あり':(hasWebSpeech()?'マイク: ブラウザ認識':'マイク: なし(文字入力)'));
+    if(caps.logging)line.push('※研究のため会話記録を保存します');
+    $('caps').innerHTML=line.join('　･　');
+    $('engineline').textContent=caps.engine==='claude'?'':'体験モード';
+    if(!caps.stt&&!hasWebSpeech())micBtn.style.display='none';
+  }catch(_){$('caps').textContent='サーバに接続できません。server.py を起動してください。';$('enter').disabled=true;}
+}
+async function start(){
+  await unlock();
+  $('enter').disabled=true;
+  $('intro').classList.add('gone');
+  await setKP('……');
+  try{
+    const d=await (await fetch('/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json();
+    sessionId=d.session_id;caps=d;
+    await present(d);
+    showControls('彼女に、話しかけてください。なんの話でも、いいんです');
+    refreshChips();
+  }catch(_){
+    await setKP('……扉が、見つからない。(サーバに接続できません)');
+  }
+}
+function showControls(h){$('controls').classList.remove('hidden');hint.textContent=h||'';if(window.innerWidth>700)sayEl.focus()}
+function hideControls(){$('controls').classList.add('hidden')}
+
+/* ── ターン ── */
+async function turn(text){
+  if(busy||!sessionId||done)return;busy=true;
+  hideControls();stopMic();$('settings').classList.remove('open');
+  if(text)addLog('you',text);else addLog('you','（……だまって、そこにいる）');
+  await setKP('……');showThinking(true);
+  try{
+    const d=await (await fetch('/turn',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:sessionId,text})})).json();
+    showThinking(false);
+    await present(d);
+    if(d.done){done=true;girlName='琴葉';await ending();}
+    else{showControls('');refreshChips();}
+  }catch(_){
+    showThinking(false);
+    await setKP('……こえが、とおい。(通信に失敗しました。もう一度どうぞ)');
+    showControls('');
+  }
+  busy=false;
+}
+async function ending(){
+  await sleep(2400);
+  $('fin').classList.add('show');$('fin').classList.remove('gone');
+  requestAnimationFrame(()=>$('fin').style.opacity='1');
+}
+$('send').onclick=()=>{const v=sayEl.value.trim();sayEl.value='';if(v)turn(v)};
+sayEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){const v=sayEl.value.trim();sayEl.value='';if(v)turn(v)}});
+$('silent').onclick=()=>turn('');
+$('enter').onclick=start;
+$('replay').onclick=()=>location.reload();
+$('finlog').onclick=()=>{$('log').classList.add('open')};
+
+/* ── マイク: サーバwhisper → ブラウザ音声認識 → 非表示 の順で確保 ── */
+function hasWebSpeech(){return !!(window.SpeechRecognition||window.webkitSpeechRecognition)}
+let mediaRecorder=null,chunks=[],recording=false,recog=null;
+function stopMic(){
+  if(mediaRecorder&&recording){recording=false;try{mediaRecorder.stop()}catch(_){}}
+  if(recog){try{recog.stop()}catch(_){}recog=null}
+  micBtn.classList.remove('live');
+}
+async function micServer(){
+  if(recording){recording=false;micBtn.classList.remove('live');hint.textContent='聞きとっています……';try{mediaRecorder.stop()}catch(_){}return}
+  let stream;
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}
+  catch(_){hint.textContent='マイクの許可が必要です。ブラウザの許可ダイアログをご確認ください';return}
+  chunks=[];mediaRecorder=new MediaRecorder(stream);
+  mediaRecorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+  mediaRecorder.onstop=async()=>{
+    stream.getTracks().forEach(t=>t.stop());
+    const blob=new Blob(chunks,{type:mediaRecorder.mimeType||'audio/webm'});
+    try{
+      const r=await fetch('/stt',{method:'POST',headers:{'Content-Type':blob.type},body:blob});
+      const d=await r.json();
+      if(d.text&&d.text.trim())turn(d.text.trim());
+      else hint.textContent='うまく聞きとれませんでした。もう一度か、文字でどうぞ';
+    }catch(_){hint.textContent='聞きとりに失敗しました。文字でどうぞ'}
+  };
+  mediaRecorder.start();recording=true;micBtn.classList.add('live');
+  hint.textContent='どうぞ、お話しください（🎙をもう一度押すと送ります）';
+}
+function micBrowser(){
+  if(recog){stopMic();return}
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  recog=new SR();recog.lang='ja-JP';recog.interimResults=false;
+  recog.onresult=e=>{const t=e.results[0][0].transcript;stopMic();if(t)turn(t)};
+  recog.onerror=()=>{stopMic();hint.textContent='聞きとれませんでした。文字でどうぞ'};
+  recog.onend=()=>micBtn.classList.remove('live');
+  recog.start();micBtn.classList.add('live');hint.textContent='どうぞ、お話しください';
+}
+micBtn.onclick=()=>{
+  if(caps.stt&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)micServer();
+  else if(hasWebSpeech())micBrowser();
+  else hint.textContent='この環境ではマイクが使えません。文字でどうぞ';
+};
+
+/* ── 初期化 ── */
+loadCaps();
+</script>
+</body>
+</html>

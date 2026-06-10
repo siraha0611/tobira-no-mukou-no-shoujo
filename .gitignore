@@ -1,0 +1,8 @@
+.env
+.venv/
+audio_cache/
+transcripts/
+__pycache__/
+*.pyc
+.DS_Store
+nohup.out
