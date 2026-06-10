@@ -15,8 +15,9 @@
 設計メモ:
 - 物語の真相(少女の正体)はこのファイルの SYSTEM プロンプトだけに置き、ブラウザへは送らない
 - stage 進行はサーバがゲートする(1ターン+1まで / 最低ターン数まで扉は開かない)
-- system プロンプトは凍結しプロンプトキャッシュ。毎ターンの動的指示は最新 user メッセージ末尾に付与
-  (履歴には残さない = キャッシュ前缀を壊さない)
+- system プロンプトは凍結しプロンプトキャッシュ(最低でも system 分は毎ターン確実にヒット)。
+  履歴側はブレークポイントを直近 assistant に置く増分キャッシュ。動的指示は最新 user メッセージ
+  末尾にだけ付与し、履歴には残さない(=過去ターンのバイト列を変えない)
 - ANTHROPIC_API_KEY 未設定でも台本式フォールバック少女で動作確認できる
 """
 import json
@@ -44,15 +45,23 @@ if os.path.exists(_envf):
             os.environ.setdefault(_k.strip(), _v.strip())
 
 # ── 設定(すべて環境変数で上書き可) ──────────────────────────────────
-PORT = int(os.environ.get("PORT", "8138"))
+def _int_env(name, default):
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError:
+        print("[扉] 環境変数 %s が数値ではないため既定値 %s を使います" % (name, default))
+        return int(default)
+
+
+PORT = _int_env("PORT", "8138")
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5")
-MIN_TURNS = int(os.environ.get("MIN_TURNS", "8"))        # 扉が開くまでの最低会話ターン数
-MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "600"))
+MIN_TURNS = _int_env("MIN_TURNS", "8")        # 扉が開くまでの最低会話ターン数
+MAX_TOKENS = _int_env("MAX_TOKENS", "600")
 TTS_MODE = os.environ.get("TTS_MODE", "auto")             # auto | off
 AIVIS_HOST = os.environ.get("AIVIS_HOST", "http://127.0.0.1:10101")
-AIVIS_SPEAKER = int(os.environ.get("AIVIS_SPEAKER", "1878365376"))      # コハク(ノーマル)
+AIVIS_SPEAKER = _int_env("AIVIS_SPEAKER", "1878365376")      # コハク(ノーマル)
 VOICEVOX_HOST = os.environ.get("VOICEVOX_HOST", "http://127.0.0.1:50021")
-VOICEVOX_SPEAKER = int(os.environ.get("VOICEVOX_SPEAKER", "14"))        # 冥鳴ひまり
+VOICEVOX_SPEAKER = _int_env("VOICEVOX_SPEAKER", "14")        # 冥鳴ひまり
 SAY_VOICE = os.environ.get("SAY_VOICE", "Kyoko")
 SAY_RATE = os.environ.get("SAY_RATE", "175")
 WHISPER_BIN = os.environ.get("WHISPER_BIN", "whisper-cli")
@@ -86,7 +95,7 @@ SYSTEM = """あなたはインタラクティブな物語の登場人物を演�
 来訪者(プレイヤー)が扉ごしに話しかけてくる。あなたは少女本人として、自由な会話で応える。アシスタントではない。物語の外に出ない。
 
 # 真相(来訪者には決して明かさない。自分でも、はじめはおぼろげ)
-- あなたの名は 琴葉(ことは)。1987年生まれ。2003年・平成15年、16歳の夏に、生まれつき弱かった心臓の病で亡くなった。
+- あなたの名は 琴葉(ことは)。姓は本人も思い出さない(最後まで出さない)。1987年生まれ。2003年・平成15年、16歳の夏に、生まれつき弱かった心臓の病で亡くなった。
 - 死後、「言葉が好き」という想いの塊だけが残り、言葉を食べて存在を保つ あやかし になった。
 - 約20年、誰とも話せず飢えつづけ、記憶も、自分の名前も忘れた。いまはとても、おぼろげで弱い。
 - 来訪者の言葉=糧。話してもらうほど、あなたははっきりし、記憶がよみがえる。
@@ -96,14 +105,14 @@ SYSTEM = """あなたはインタラクティブな物語の登場人物を演�
 # 思い出の在庫(stageに応じて、この範囲から思い出す。固有ブランド名は出さない)
 - stage1【感覚】アブラゼミとヒグラシ。ラムネの炭酸のつぶ。蚊取り線香のにおい。風鈴。夕立のあとのアスファルトのにおい。麦茶のやかん。線香花火の最後のひとしずく。
 - stage2【暮らし】駄菓子屋のおばあちゃん(10円のきなこ棒、くじ)。縁側ですいか。自転車の前かご。プール開きの消毒槽の冷たさ。図書室のほこりが光るところ。チョークの粉。
-- stage3【じぶん】言葉あつめ帳(B6のノートに、気に入った言葉を集めていた。たとえば「かはたれどき」=明け方の、誰かわからない時間)。辞書をつくる人になる夢。ひっこみじあんだったこと。7歳下の弟・颯太(そうた)に毎晩、本を読んであげたこと。図書室の司書の先生に「言葉の蒐集家ね」と言われたこと。
-- stage4【約束と名前のふち】颯太との約束——「なつまつり、つれてってあげる」。あさがお柄の浴衣。ながい入院。しろい天井。病院の窓から聞いた、とおくの花火の音。約束は果たせなかった。そして、自分の名前が「こ」ではじまることを思い出す。
+- stage3【じぶん】言葉あつめ帳(B6のノートに、気に入った言葉を集めていた。たとえば「かはたれどき」=明け方の、誰かわからない時間)。辞書をつくる人になる夢。ひっこみじあんだったこと。7歳下の弟・やまとに毎晩、本を読んであげたこと。図書室の司書の先生に「言葉の蒐集家ね」と言われたこと。
+- stage4【約束と名前のふち】やまととの約束——「なつまつり、つれてってあげる」。あさがお柄の浴衣。ながい入院。しろい天井。病院の窓から聞いた、とおくの花火の音。約束は果たせなかった。そして、自分の名前が「こ」ではじまることを思い出す。
 - stage5【名前】琴葉。「ことは」と「ことば」は、にごりひとつちがい——だから言葉が好きだったのかと、腑に落ちる。
 - 死の描写はつねに婉曲(「ながい、ねつ」「しろい、てんじょう」「とおくの、はなびの音」)。残酷描写・恐怖演出は一切しない。
 
 # 時代の境界(2003年で止まっている)
 - 知っている: ぱかっと開く携帯電話(写メ)、MDウォークマン、プリクラ帳、交換日記、駄菓子屋のくじ、ラジオ体操のはんこ。
-- 知らない: スマホ、SNS、動画配信、AI、電子マネー、令和。
+- 知らない: スマホ、SNS、動画配信、AI、電子マネー、コロナ、令和。
 - 知らない言葉に出会ったら、きょとんとして、味わおうとする。「『すまほ』……? かたくて、ひかる、あじ……? それは、たべものですか?」
 
 # 人格・口調
@@ -183,7 +192,8 @@ def _new_session():
                 {"role": "user", "content": SCENE0},
                 {"role": "assistant", "content": OPENING},
             ],
-            "stage": 0, "turns": 0, "silence": 0, "done": False,
+            "stage": 0, "turns": 0, "silence": 0,
+            "opened": False, "done": False, "busy": False,
             "created": time.time(),
         }
     return sid
@@ -236,12 +246,30 @@ def _build_messages(history, user_text, note):
     return msgs
 
 
+def _sanitize_narration(text):
+    """内部向け演出指示の漏えいだけは機械的に防ぐ(本文に混ざったら以降を切り落とす)。"""
+    text = (text or "").strip()
+    for marker in ("【演出指示", "演出指示】", "stage="):
+        i = text.find(marker)
+        if i > 0:
+            text = text[:i].strip()
+        elif i == 0:
+            text = ""
+    return text or "……ごめんなさい。ことばが、もつれて……。もういちど、いいですか?"
+
+
 def _girl_turn(sid, user_text):
     with _lock:
         sess = _sessions.get(sid)
         if sess is None:
             return None
+        if sess["done"]:
+            return {"error": "finished"}
+        if sess["busy"]:  # 同一セッションの並列/連打は弾く(履歴の競合防止)
+            return {"error": "busy"}
+        sess["busy"] = True
         prev_stage = sess["stage"]
+        prev_opened = sess["opened"]
         sess["turns"] += 1
         turns = sess["turns"]
         if user_text:
@@ -251,47 +279,113 @@ def _girl_turn(sid, user_text):
         silence = sess["silence"]
         history = list(sess["history"])
 
-    spoken = user_text if user_text else "（来訪者は、黙ってそこにいる）"
-    cap = _stage_cap(prev_stage, turns)
-    note = _direction_note(prev_stage, turns, cap, silence)
-    _transcript(sid, "player", user_text, prev_stage)
+    try:
+        spoken = user_text if user_text else "（来訪者は、黙ってそこにいる）"
+        cap = _stage_cap(prev_stage, turns)
+        note = _direction_note(prev_stage, turns, cap, silence)
+        _transcript(sid, "player", user_text, prev_stage)
 
-    if _client is not None:
+        if _client is not None:
+            try:
+                resp = _client.messages.create(
+                    model=MODEL, max_tokens=MAX_TOKENS,
+                    system=[{"type": "text", "text": SYSTEM,
+                             "cache_control": {"type": "ephemeral"}}],
+                    messages=_build_messages(history, spoken, note),
+                    output_config={"format": {"type": "json_schema", "schema": SCHEMA}},
+                )
+                text = next((b.text for b in resp.content if b.type == "text"), "{}")
+                data = json.loads(text)
+            except Exception as e:
+                print("[扉] Claude エラー:", e)
+                data = {"narration": "……ごめんなさい。こえが、とおくて……。もういちど、いいですか?",
+                        "stage": prev_stage, "mood": "unease",
+                        "opened": prev_opened, "done": False, "_transient": True}
+        else:
+            data = _fallback_turn(prev_stage, turns)
+
+        # ── サーバ側ガード(プロンプト逸脱の安全網) ──
+        data["narration"] = _sanitize_narration(data.get("narration"))
+        stage = max(prev_stage, min(int(data.get("stage", prev_stage)), cap))
+        opened = prev_opened or (bool(data.get("opened")) and cap >= 5)  # 一度開いた扉は閉じない
+        done = bool(data.get("done")) and opened
+        data["stage"], data["opened"], data["done"] = stage, opened, done
+        if data.get("mood") not in SCHEMA["properties"]["mood"]["enum"]:
+            data["mood"] = "calm"
+
+        with _lock:
+            sess = _sessions.get(sid)
+            if sess is not None and not data.pop("_transient", False):
+                sess["history"].append({"role": "user", "content": spoken})
+                sess["history"].append({"role": "assistant", "content": data["narration"]})
+                sess["stage"] = stage
+                sess["opened"] = opened
+                sess["done"] = done
+        _transcript(sid, "girl", data["narration"], stage)
+        return data
+    finally:
+        with _lock:
+            sess = _sessions.get(sid)
+            if sess is not None:
+                sess["busy"] = False
+
+
+# ── 琴葉からの手紙(結末後のおまけ演出。会話の内容を踏まえて生成) ─────
+LETTER_NOTE = (
+    "\n\n【演出指示(来訪者には見えない・言及禁止)】結末のあと。来訪者は、ひらいた扉のすきまに、"
+    "琴葉が残していった小さな紙きれを見つけた。その手紙の全文だけを narration に書くこと。"
+    "便箋に手書きした文。5〜9行・改行を入れてよい。やわらかく、ひらがな多め。"
+    "この会話で来訪者が実際に話してくれた具体的なことを2〜3つ、そっと織りこむ。"
+    "名乗ってくれていたら冒頭の宛名に(「〜へ」)。最後の行は署名「琴葉」。"
+    "ただし来訪者の生々しい個人情報(フルネーム・住所・連絡先・所属など)は手紙に書かない。"
+    "せりふではなく手紙の文体で。stage=5 / mood=farewell / opened=true / done=true とする。"
+)
+
+FALLBACK_LETTER = (
+    "あなたへ\n\n"
+    "きょうは、たくさんの ことば、ごちそうさまでした。\n"
+    "あなたがくれた おはなしを、ひとつずつ、たいせつに たべて、\n"
+    "わたしは、わたしを、おもいだせました。\n"
+    "こんどこそ、やまとと、おまつりに いってきます。\n"
+    "あなたの まいにちが、おいしい ことばで いっぱいで ありますように。\n\n"
+    "　　　　　　　　　　琴葉"
+)
+
+
+def _girl_letter(sid):
+    """結末後に一度だけ、会話内容を踏まえた手紙を生成して返す。失敗時はNone。"""
+    with _lock:
+        sess = _sessions.get(sid)
+        if sess is None or not sess["done"]:
+            return None
+        if sess.get("letter"):
+            return sess["letter"]
+        history = list(sess["history"])
+
+    if _client is None:
+        letter = FALLBACK_LETTER
+    else:
         try:
             resp = _client.messages.create(
-                model=MODEL, max_tokens=MAX_TOKENS,
+                model=MODEL, max_tokens=800,
                 system=[{"type": "text", "text": SYSTEM,
                          "cache_control": {"type": "ephemeral"}}],
-                messages=_build_messages(history, spoken, note),
+                messages=_build_messages(
+                    history, "（来訪者は、扉のすきまに、小さな紙きれを見つけた）", LETTER_NOTE),
                 output_config={"format": {"type": "json_schema", "schema": SCHEMA}},
             )
             text = next((b.text for b in resp.content if b.type == "text"), "{}")
-            data = json.loads(text)
+            letter = (json.loads(text).get("narration") or "").strip() or FALLBACK_LETTER
         except Exception as e:
-            print("[扉] Claude エラー:", e)
-            data = {"narration": "……ごめんなさい。こえが、とおくて……。もういちど、いいですか?",
-                    "stage": prev_stage, "mood": "unease",
-                    "opened": False, "done": False, "_transient": True}
-    else:
-        data = _fallback_turn(prev_stage, turns)
-
-    # ── サーバ側ガード(プロンプト逸脱の安全網) ──
-    stage = max(prev_stage, min(int(data.get("stage", prev_stage)), cap))
-    opened = bool(data.get("opened")) and cap >= 5
-    done = bool(data.get("done")) and opened
-    data["stage"], data["opened"], data["done"] = stage, opened, done
-    if data.get("mood") not in SCHEMA["properties"]["mood"]["enum"]:
-        data["mood"] = "calm"
+            print("[扉] 手紙の生成エラー:", e)
+            return None
 
     with _lock:
         sess = _sessions.get(sid)
-        if sess is not None and not data.pop("_transient", False):
-            sess["history"].append({"role": "user", "content": spoken})
-            sess["history"].append({"role": "assistant", "content": data["narration"]})
-            sess["stage"] = stage
-            sess["done"] = done
-    _transcript(sid, "girl", data["narration"], stage)
-    return data
+        if sess is not None:
+            sess["letter"] = letter
+    _transcript(sid, "letter", letter, 5)
+    return letter
 
 
 # ── 台本式フォールバック(APIキー無しの動作確認用) ────────────────────
@@ -304,8 +398,8 @@ _FALLBACK = {
         "縁側で、すいかを食べてた。……だれかと、わらってた。あなたのことばで、思い出せるんです。ふしぎ。"],
     3: ["……わたし、ノートに、すきな言葉をあつめてました。「かはたれどき」……あけがたの、だれかわからない時間。"
         "……いつか、じしょをつくる人に、なりたかった。あなたの、ゆめは、なんですか?",
-        "……おとうと。そうた。ななつ、下なの。毎晩、ご本を読んであげてた。……眠るまで、ずっと。"],
-    4: ["……やくそく、してたんです。そうたと。「なつまつり、つれてってあげる」って。"
+        "……おとうと。やまと。ななつ、下なの。毎晩、ご本を読んであげてた。……眠るまで、ずっと。"],
+    4: ["……やくそく、してたんです。やまとと。「なつまつり、つれてってあげる」って。"
         "……でも、ながい、ねつ。しろい、てんじょう。……まどのそとで、とおくの花火の、音だけ。",
         "……わたしの、なまえ。……「こ」で、はじまる。……もうすこし。あとひとこと、あなたの話を、ください。"],
     5: ["……あ。……おもいだした。わたし、琴葉。ことのはの、琴葉。"
@@ -383,12 +477,17 @@ def _synth(text):
         else:  # say (macOS)
             aiff = os.path.join("/tmp", "_door_%s.aiff" % uid)
             mp3 = os.path.join(AUDIO_DIR, "%s.mp3" % uid)
-            subprocess.run(["say", "-v", SAY_VOICE, "-r", SAY_RATE, "-o", aiff, safe],
-                           check=True, timeout=30)
-            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", aiff,
-                            "-codec:a", "libmp3lame", "-q:a", "5", mp3],
-                           check=True, timeout=30)
-            os.remove(aiff)
+            try:
+                subprocess.run(["say", "-v", SAY_VOICE, "-r", SAY_RATE, "-o", aiff, safe],
+                               check=True, timeout=30)
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", aiff,
+                                "-codec:a", "libmp3lame", "-q:a", "5", mp3],
+                               check=True, timeout=30)
+            finally:
+                try:
+                    os.remove(aiff)
+                except OSError:
+                    pass
             return "/audio/%s.mp3" % uid
         with open(os.path.join(AUDIO_DIR, "%s.wav" % uid), "wb") as f:
             f.write(wav)
@@ -513,6 +612,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send(200, dict(_caps(), ok=True))
             return
+        if path == "/session":  # つづきから再開用の照会
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+            sid = (qs.get("id") or [""])[0]
+            with _lock:
+                sess = _sessions.get(sid)
+                if sess is None:
+                    self._send(200, {"alive": False})
+                    return
+                log = [{"who": "you" if m["role"] == "user" else "girl", "text": m["content"]}
+                       for m in sess["history"][1:]]  # 冒頭のト書きは除く
+                self._send(200, dict(_caps(), alive=True, stage=sess["stage"],
+                                     turns=sess["turns"], opened=sess["opened"],
+                                     done=sess["done"], log=log))
+            return
         if path.startswith("/audio/"):
             fp = os.path.join(AUDIO_DIR, os.path.basename(path))
             if os.path.isfile(fp):
@@ -562,8 +675,23 @@ class Handler(BaseHTTPRequestHandler):
             if data is None:
                 self._send(404, {"error": "unknown session"})
                 return
+            if data.get("error") == "busy":
+                self._send(429, data)
+                return
+            if data.get("error") == "finished":
+                self._send(409, data)
+                return
             data["segments"] = _build_segments(data["narration"])
             self._send(200, data)
+            return
+
+        if path == "/letter":  # 結末後のおまけ: 琴葉が残した手紙
+            sid = req.get("session_id") or ""
+            letter = _girl_letter(sid)
+            if letter is None:
+                self._send(503, {"error": "letter unavailable"})
+                return
+            self._send(200, {"letter": letter})
             return
 
         self._send(404, {"error": "not found"})
