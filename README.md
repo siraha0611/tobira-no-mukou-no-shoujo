@@ -20,7 +20,7 @@
 必要なもの: **Python 3.9+** と **Anthropic API キー**([console.anthropic.com](https://console.anthropic.com/) で取得)
 
 ```bash
-git clone https://github.com/<your-account>/tobira-no-mukou-no-shoujo.git
+git clone https://github.com/siraha0611/tobira-no-mukou-no-shoujo.git
 cd tobira-no-mukou-no-shoujo
 
 # 1) 依存をインストール(venv推奨)
