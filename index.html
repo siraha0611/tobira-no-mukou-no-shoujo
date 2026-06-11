@@ -115,7 +115,7 @@
   #recstate{font-size:12.5px;color:#cfa79e;letter-spacing:.14em}
   #controls.transcribing #recstate{color:var(--warm)}
 
-  /* ── 琴葉の手紙 ───────────────────────────── */
+  /* ── 綾香の手紙 ───────────────────────────── */
   #letterview{display:none;max-width:min(88vw,460px);text-align:left;background:rgba(244,236,216,.04);
     border:1px solid #3d3829;border-radius:4px;padding:30px 34px;position:relative}
   #letterview.show{display:block;animation:paperin 1.2s ease}
@@ -241,9 +241,9 @@
   </div>
 
   <div class="overlay gone" id="fin">
-    <div class="name">琴 葉</div>
-    <div class="yomi">ことは</div>
-    <p>ことばと、ひと文字ちがいの名前。<br>あなたのことばが、彼女を連れて帰りました。</p>
+    <div class="name">綾 香</div>
+    <div class="yomi">あやか</div>
+    <p>あやかしと、ひと文字ちがいの名前。<br>ことばの綾の、綾。<br>あなたのことばが、彼女を連れて帰りました。</p>
     <div id="letterview"><div id="lettertext"></div></div>
     <div class="btns">
       <button id="letterbtn" class="pill">扉のすきまに——紙きれがある</button>
@@ -393,7 +393,7 @@ async function turn(text){
     if(!r.ok)throw 0;
     const d=await r.json();
     await present(d);
-    if(d.done){done=true;girlName='琴葉';store.set('sid',null);await ending();}
+    if(d.done){done=true;girlName='綾香';store.set('sid',null);await ending();}
     else{showControls('');refreshChips();}
   }catch(_){
     showThinking(false);
@@ -541,7 +541,7 @@ micBtn.onclick=()=>{
   else hint.textContent='この環境ではマイクが使えません。文字でどうぞ';
 };
 
-/* ── 琴葉の手紙(結末後のおまけ) ── */
+/* ── 綾香の手紙(結末後のおまけ) ── */
 let letterText=null;
 $('letterbtn').onclick=async()=>{
   const btn=$('letterbtn');
