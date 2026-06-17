@@ -439,8 +439,28 @@ def _vv_synth(host, speaker, text):
     return urllib.request.urlopen(req2, timeout=30).read()  # WAV bytes
 
 
+def _http_probe(url, deadline=1.0):
+    """URLに繋がるかを「壁時計で必ずdeadline以内」に判定する。
+    声エンジンが起動途中(TCPは受けるがHTTP応答しない=urlopenのtimeoutが効かない)
+    状態でも、デーモンスレッドを見捨てることで本体は絶対に固まらない。"""
+    box = {}
+
+    def go():
+        try:
+            urllib.request.urlopen(url, timeout=deadline).read(64)
+            box["ok"] = True
+        except Exception:
+            box["ok"] = False
+
+    th = threading.Thread(target=go, daemon=True)
+    th.start()
+    th.join(deadline + 0.2)
+    return box.get("ok", False)  # スレッドが残っていても(=ハング)False扱い
+
+
 def _tts_engine():
-    """使える音声エンジンを判定(30秒キャッシュ。途中起動にも追従)。"""
+    """使える音声エンジンを判定(30秒キャッシュ。途中起動にも追従)。
+    探索は _http_probe で時間上限が保証されるため、エンジン不調でも固まらない。"""
     if TTS_MODE == "off":
         return None
     now = time.time()
@@ -448,12 +468,9 @@ def _tts_engine():
         return _tts_status["engine"]
     engine = None
     for name, host in (("aivis", AIVIS_HOST), ("voicevox", VOICEVOX_HOST)):
-        try:
-            urllib.request.urlopen(host + "/version", timeout=1.5).read()
+        if _http_probe(host + "/version", deadline=1.0):
             engine = name
             break
-        except Exception:
-            continue
     if engine is None and _HAS_SAY and _HAS_FFMPEG:
         engine = "say"
     _tts_status.update(engine=engine, checked=now)
@@ -705,11 +722,17 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     _gc_audio()
-    caps = _caps()
-    print("『扉のむこうの少女』 → http://localhost:%d" % PORT)
-    print("    会話: %s / 声: %s / マイク: %s%s"
-          % ("Claude (%s)" % MODEL if _client else "台本フォールバック(APIキー未設定)",
-             caps["tts"] or "なし(テキストのみ)",
-             "あり(whisper)" if caps["stt"] else "なし(打ち込みのみ)",
-             " / 記録: ON" if SAVE_TRANSCRIPTS else ""))
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    # 先にポートをbind(=ここで起動成功が確定)。声/マイク検出のような任意要素は
+    # サーバ生成後に行い、外部エンジンの不調が「起動そのもの」を妨げないようにする。
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    print("『扉のむこうの少女』 → http://localhost:%d" % PORT, flush=True)
+    try:
+        caps = _caps()
+        print("    会話: %s / 声: %s / マイク: %s%s"
+              % ("Claude (%s)" % MODEL if _client else "台本フォールバック(APIキー未設定)",
+                 caps["tts"] or "なし(テキストのみ)",
+                 "あり(whisper)" if caps["stt"] else "なし(打ち込みのみ)",
+                 " / 記録: ON" if SAVE_TRANSCRIPTS else ""), flush=True)
+    except Exception as e:
+        print("    (起動時の能力検出をスキップ:", e, ")", flush=True)
+    srv.serve_forever()
