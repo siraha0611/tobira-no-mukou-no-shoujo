@@ -260,7 +260,7 @@ function refreshVoices(){
   chosenVoice=voices.find(v=>/^ja[-_]/i.test(v.lang))||voices.find(v=>/Japanese|Kyoko|Otoya|Haruka/i.test(v.name))||null;
 }
 if('speechSynthesis'in window){refreshVoices();speechSynthesis.onvoiceschanged=refreshVoices}
-function readingText(text){return String(text||'').replaceAll('綾'+'香','アヤカ')}
+function readingText(text){return String(text||'').replaceAll('綾'+'香','アヤカ').replaceAll('妖','あやかし')}
 function speak(text){
   return new Promise(res=>{
     if(!voiceOn||!('speechSynthesis'in window)||!text){res();return}
