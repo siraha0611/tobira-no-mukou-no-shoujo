@@ -126,6 +126,7 @@
   .overlay.gone{opacity:0;pointer-events:none}
   #intro h1{font-size:clamp(24px,4.4vw,36px);letter-spacing:.3em;font-weight:400;color:#d8d2c4;text-indent:.3em}
   #intro .lead{color:#8d8678;letter-spacing:.12em;font-size:14px;line-height:2.4}
+  #intro .lead em{color:var(--warm);font-style:normal}
   #steps{display:flex;flex-direction:column;gap:10px;align-items:flex-start;margin:4px auto}
   #steps div{color:#9a9384;font-size:13px;letter-spacing:.1em;line-height:1.9}
   #steps b{color:var(--warm);font-weight:400;margin-right:10px}
@@ -219,8 +220,8 @@
     <div class="gstep on" data-step="1">
       <span class="gkicker">For first-timers</span>
       <h2 class="gh">RPって、なに?</h2>
-      <p class="gbody">ロールプレイ（RP）は、物語のなかの“誰か”になったつもりで、話すこと。<br>
-        うまく演じる必要はありません。<br><em>「この子なら、どう言うかな」</em>を想像して、ひとこと返す——ただ、それだけです。</p>
+      <p class="gbody">ロールプレイ（RP）と聞くと、上手に“キャラクターを演じる”ことだと思うかもしれません。<br>
+        でも、ここでは違います。<br><em>あなたは、あなたのまま。</em>物語のなかに生きている“誰か”と、ことばを交わす——ただ、それだけの体験です。</p>
       <button class="gnext" data-go="2">次へ →</button>
       <div class="gdots"><i class="on"></i><i></i><i></i></div>
       <button class="gskip" data-go="3">RPに慣れている方は、そのまま扉へ →</button>
@@ -229,8 +230,7 @@
     <div class="gstep" data-step="2">
       <span class="gkicker">Don't worry</span>
       <h2 class="gh">失敗は、ありません</h2>
-      <p class="gbody">正解も、間違いもありません。短くていい——<br><em>「うれしい」「どうしよう」</em>だけでも、立派なRPです。<br>
-        迷ったら「迷ってる」と言っても、しばらく黙っていても、かまいません。</p>
+      <p class="gbody">正解も、間違いもありません。<br>思ったことを、あなたの言葉で返すだけ。<br><em>「うれしい」「どうしよう」</em>のひとことでも、しばらく黙っていても、だいじょうぶです。</p>
       <button class="gnext" data-go="3">わかった →</button>
       <div class="gdots"><i></i><i class="on"></i><i></i></div>
       <button class="gback" data-go="1">← もどる</button>
@@ -238,7 +238,8 @@
     <!-- 3: 扉の前(本編へ) -->
     <div class="gstep" data-step="3">
       <h1>扉のむこうの少女</h1>
-      <p class="lead">これから、扉のむこうの女の子と話します。<br>
+      <p class="lead"><em>まずは、あなたのままで、</em><br>
+        扉のむこうの少女と、お話をしてみましょう。<br>
         何を話しても大丈夫。あなたの言葉が、彼女の記憶を呼びさまします。</p>
       <p class="meta">所要 15〜20分 ／ こわい演出はありません</p>
       <div id="turnstilebox" style="display:none">
