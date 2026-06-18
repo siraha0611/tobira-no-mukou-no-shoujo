@@ -1,0 +1,17 @@
+name = "tobira-no-mukou-no-shoujo-web"
+main = "src/worker.ts"
+compatibility_date = "2026-06-18"
+workers_dev = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[kv_namespaces]]
+binding = "DOOR_KV"
+id = "00000000000000000000000000000000"
+preview_id = "00000000000000000000000000000000"
+
+[vars]
+DAILY_CALL_CAP = "600"
+TURNSTILE_SITE_KEY = "1x00000000000000000000AA"

@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>扉のむこうの少女</title>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>
+<style>
+  :root{
+    --ink:#e9e4d8; --dim:#7d7668; --faint:#46443e; --gold:#c9a86a;
+    --warm:#e8c98a; --panel:#14131a; --line:#2c2a33; --danger:#b98b70;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:radial-gradient(120% 90% at 50% 18%,#14131a,#0a0a10 55%,#050509);
+    color:var(--ink);font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+    overflow:hidden;
+  }
+
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;transition:background 2.5s}
+  #door{position:absolute;top:46%;left:50%;transform:translate(-50%,-50%);
+    width:min(44vw,300px);height:min(64vh,500px);
+    border:1px solid #2a2620;border-radius:6px 6px 0 0;
+    background:linear-gradient(180deg,#100f14,#0b0a0f);
+    box-shadow:0 0 0 1px #000 inset,0 30px 80px rgba(0,0,0,.6);
+    transition:filter 2.5s,opacity 2s,transform 2.5s}
+  #door::before{
+    content:"";position:absolute;top:8%;bottom:0;left:50%;width:2px;transform:translateX(-50%);
+    background:linear-gradient(180deg,transparent,rgba(244,236,216,.05),transparent);
+    transition:background 2.5s,box-shadow 2.5s}
+  #figure{
+    position:absolute;bottom:0;left:50%;transform:translateX(-50%);
+    width:34%;height:46%;border-radius:50% 50% 0 0;
+    background:radial-gradient(60% 80% at 50% 30%,rgba(244,236,216,.10),transparent 75%);
+    opacity:0;transition:opacity 3s;filter:blur(6px)}
+  body[data-beat="1"] #door::before{background:linear-gradient(180deg,transparent,rgba(244,236,216,.14),transparent)}
+  body[data-beat="2"] #door::before{background:linear-gradient(180deg,transparent,rgba(244,236,216,.26),transparent);box-shadow:0 0 18px rgba(244,236,216,.08)}
+  body[data-beat="3"] #door::before{background:linear-gradient(180deg,transparent,rgba(232,201,138,.38),transparent);box-shadow:0 0 28px rgba(232,201,138,.14)}
+  body[data-beat="3"] #figure{opacity:.5}
+  body[data-beat="4"] #door::before{background:linear-gradient(180deg,transparent,rgba(232,201,138,.52),transparent);box-shadow:0 0 40px rgba(232,201,138,.2)}
+  body[data-beat="4"] #figure{opacity:.75}
+  body[data-beat="5"] #door::before{background:linear-gradient(180deg,transparent,rgba(201,168,106,.7),transparent);box-shadow:0 0 56px rgba(201,168,106,.3)}
+  body[data-beat="5"] #figure{opacity:.9}
+  body[data-mood="lonely"] #door::before,body[data-mood="unease"] #door::before{filter:saturate(.4) brightness(.8)}
+  body[data-mood="joy"] #door::before,body[data-mood="farewell"] #door::before{filter:saturate(1.2) brightness(1.15)}
+  body.open #stage{background:radial-gradient(60% 60% at 50% 46%,rgba(244,236,216,.85),transparent 70%)}
+  body.open #door{filter:brightness(2.4);transform:translate(-50%,-50%) scaleX(.05);opacity:0}
+  body.open #figure{opacity:0}
+
+  #panel{position:fixed;left:0;right:0;top:54%;z-index:3;display:flex;flex-direction:column;align-items:center;pointer-events:none;padding:0 5vw}
+  #kp{font-size:clamp(17px,2.6vw,25px);line-height:2;letter-spacing:.05em;text-align:center;
+    min-height:3.6em;display:flex;align-items:center;justify-content:center;
+    text-shadow:0 1px 30px rgba(0,0,0,.9);opacity:0;transition:opacity .8s}
+  #kp.show{opacity:1}
+  #thinking{color:var(--dim);font-size:12px;letter-spacing:.22em;opacity:0;transition:opacity .6s;margin-top:6px}
+  #thinking.show{opacity:.9;animation:breathe 2.2s ease-in-out infinite}
+  @keyframes breathe{50%{opacity:.35}}
+
+  #topbar{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;justify-content:space-between;
+    padding:12px 16px;gap:10px}
+  #brand{font-size:12px;letter-spacing:.18em;color:var(--faint);white-space:nowrap}
+  #brand b{display:block;color:#8d8678;font-weight:400;font-size:13px;letter-spacing:.3em}
+  #memory{display:flex;flex-direction:column;align-items:center;gap:5px}
+  #memory .label{font-size:10px;letter-spacing:.4em;color:var(--faint)}
+  #dots{display:flex;gap:10px}
+  .dot{width:9px;height:9px;border-radius:50%;border:1px solid #4a463c;background:transparent;transition:all 1.2s}
+  .dot.lit{background:var(--warm);border-color:var(--warm);box-shadow:0 0 10px rgba(232,201,138,.55)}
+  #menu{display:flex;gap:8px;align-items:center}
+  .iconbtn{font-family:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);
+    background:rgba(20,18,26,.85);color:var(--dim);padding:7px 11px;font-size:13px;transition:.2s}
+  .iconbtn:hover,.iconbtn.on{border-color:var(--gold);color:var(--ink)}
+
+  #controls{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;flex-direction:column;align-items:center;
+    gap:10px;padding:14px 16px calc(20px + env(safe-area-inset-bottom));transition:opacity .5s}
+  #controls.hidden{opacity:0;pointer-events:none}
+  #chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:min(92vw,640px)}
+  .chip{font-family:inherit;cursor:pointer;font-size:12px;color:#9a9384;background:rgba(15,14,20,.7);
+    border:1px solid var(--line);border-radius:20px;padding:7px 14px;transition:.2s;letter-spacing:.04em}
+  .chip:hover{border-color:var(--gold);color:var(--ink)}
+  #row{display:flex;gap:9px;width:min(92vw,620px)}
+  #say{flex:1;background:rgba(15,14,20,.88);border:1px solid var(--line);color:var(--ink);
+    font-family:inherit;font-size:16px;padding:13px 18px;border-radius:30px;outline:none;transition:border .2s;min-width:0}
+  #say:focus{border-color:#56503f}
+  #say::placeholder{color:#54505c}
+  button{font-family:inherit;cursor:pointer}
+  .pill{border-radius:30px;border:1px solid var(--line);background:rgba(20,18,26,.9);
+    color:var(--ink);padding:13px 18px;font-size:15px;transition:.2s;white-space:nowrap}
+  .pill:hover{border-color:var(--gold)}
+  .pill:disabled{opacity:.45;cursor:default}
+  #subrow{display:flex;gap:14px;align-items:center}
+  #silent{font-size:12px;color:var(--dim);background:none;border:none;letter-spacing:.1em;padding:4px}
+  #silent:hover{color:var(--ink)}
+  #hint{color:var(--dim);font-size:12px;letter-spacing:.08em;min-height:16px;text-align:center}
+
+  #letterview{display:none;max-width:min(88vw,460px);text-align:left;background:rgba(244,236,216,.04);
+    border:1px solid #3d3829;border-radius:4px;padding:30px 34px;position:relative}
+  #letterview.show{display:block;animation:paperin 1.2s ease}
+  @keyframes paperin{from{opacity:0;transform:translateY(10px)}to{opacity:1}}
+  #letterview::before{content:"";position:absolute;inset:6px;border:1px solid rgba(201,168,106,.14);pointer-events:none}
+  #lettertext{font-size:14.5px;line-height:2.4;color:#ded7c6;letter-spacing:.06em;white-space:pre-wrap}
+
+  #log{position:fixed;top:0;right:0;bottom:0;width:min(86vw,340px);z-index:20;background:rgba(10,10,15,.96);
+    border-left:1px solid var(--line);transform:translateX(102%);transition:transform .4s;display:flex;flex-direction:column}
+  #log.open{transform:none}
+  #log header{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid #1c1a22}
+  #log header span{font-size:13px;letter-spacing:.3em;color:#8d8678}
+  #logbody{flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:14px}
+  .turn .who{font-size:10px;letter-spacing:.3em;color:var(--faint);margin-bottom:4px}
+  .turn .what{font-size:13px;line-height:1.9;color:#cfc9bb;white-space:pre-wrap}
+  .turn.you .what{color:#9a9384}
+
+  #settings{position:fixed;top:54px;right:14px;z-index:25;background:rgba(12,11,17,.97);border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;display:none;flex-direction:column;gap:14px;min-width:230px}
+  #settings.open{display:flex}
+  #settings .opt{display:flex;justify-content:space-between;align-items:center;gap:14px;font-size:13px;color:#bdb7a9}
+  #settings input[type=range]{width:110px;accent-color:var(--gold)}
+  .switch{cursor:pointer;border:1px solid var(--line);border-radius:16px;padding:3px 10px;font-size:12px;background:none;color:var(--dim)}
+  .switch.on{color:var(--warm);border-color:var(--warm)}
+
+  .overlay{position:fixed;inset:0;z-index:30;background:#050509;display:flex;flex-direction:column;
+    align-items:center;justify-content:flex-start;gap:24px;transition:opacity 1.4s;padding:6vh 8vw;text-align:center;overflow-y:auto}
+  .overlay>:first-child{margin-top:auto}
+  .overlay>:last-child{margin-bottom:auto}
+  .overlay.gone{opacity:0;pointer-events:none}
+  #intro h1{font-size:clamp(24px,4.4vw,36px);letter-spacing:.3em;font-weight:400;color:#d8d2c4;text-indent:.3em}
+  #intro .lead{color:#8d8678;letter-spacing:.12em;font-size:14px;line-height:2.4}
+  #steps{display:flex;flex-direction:column;gap:10px;align-items:flex-start;margin:4px auto}
+  #steps div{color:#9a9384;font-size:13px;letter-spacing:.1em;line-height:1.9}
+  #steps b{color:var(--warm);font-weight:400;margin-right:10px}
+  .meta{color:var(--faint);font-size:11.5px;letter-spacing:.14em;line-height:2.2}
+  #enter{padding:16px 46px;letter-spacing:.26em;border:1px solid #3a3630;background:transparent;color:var(--ink);
+    border-radius:30px;font-size:15px;transition:.3s;text-indent:.26em}
+  #enter:hover{border-color:var(--gold);box-shadow:0 0 24px rgba(201,168,106,.15)}
+  #enter:disabled{opacity:.45}
+  #caps{color:var(--faint);font-size:11px;letter-spacing:.1em;line-height:2;min-height:2em;max-width:640px}
+  #caps .warn{color:var(--danger)}
+  #turnstilebox{min-height:70px;display:flex;align-items:center;justify-content:center}
+
+  #fin{display:none}
+  #fin.show{display:flex}
+  #fin .name{font-size:clamp(25px,5vw,38px);letter-spacing:.35em;color:#e8dfc8;text-indent:.35em}
+  #fin p{color:#8d8678;font-size:13.5px;letter-spacing:.14em;line-height:2.6}
+  #fin .btns{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+
+  @media (max-width:640px){
+    #brand{display:none}
+    #door{width:62vw;top:42%}
+    #panel{top:56%}
+    #chips .chip:nth-child(3){display:none}
+    .pill{padding:13px 15px}
+  }
+</style>
+</head>
+<body data-beat="0" data-mood="calm">
+
+  <div id="stage"><div id="door"><div id="figure"></div></div></div>
+
+  <div id="topbar">
+    <div id="brand"><b>扉のむこうの少女</b><span id="engineline">Web文字版</span></div>
+    <div id="memory" title="彼女が思い出すと、灯がともります">
+      <div id="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      <div class="label">おもいで</div>
+    </div>
+    <div id="menu">
+      <button class="iconbtn" id="logbtn" title="ことばの記録">記録</button>
+      <button class="iconbtn" id="setbtn" title="設定">⚙</button>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div id="kp" aria-live="polite"></div>
+    <div id="thinking">（ことばを、たべている……）</div>
+  </div>
+
+  <div id="controls" class="hidden">
+    <div id="hint"></div>
+    <div id="chips" title="話すことに迷ったら"></div>
+    <div id="row">
+      <input id="say" type="text" placeholder="扉のむこうへ、話しかける" autocomplete="off" maxlength="1000">
+      <button class="pill" id="send">送る</button>
+    </div>
+    <div id="subrow"><button id="silent" title="何も言わずに、そこにいる">……だまって、そこにいる</button></div>
+  </div>
+
+  <aside id="log" aria-label="ことばの記録">
+    <header><span>ことばの記録</span><button class="iconbtn" id="logclose">✕</button></header>
+    <div id="logbody"></div>
+  </aside>
+
+  <div id="settings">
+    <div class="opt"><span>こえの大きさ</span><input id="vol" type="range" min="0" max="100" value="90"></div>
+    <div class="opt"><span>こえ</span><button class="switch on" id="voicesw">ON</button></div>
+    <div class="opt"><span>字幕の速さ</span><button class="switch" id="speedsw">ふつう</button></div>
+  </div>
+
+  <div class="overlay" id="intro">
+    <h1>扉のむこうの少女</h1>
+    <p class="lead">暗がりに、ふるい扉がひとつ。<br>むこうから、小さな声がします。</p>
+    <div id="steps">
+      <div><b>一、</b>扉の前に立つ</div>
+      <div><b>二、</b>なんでもいい、文字で話しかける</div>
+      <div><b>三、</b>彼女が思い出せたら——扉は、ひらく</div>
+    </div>
+    <p class="meta">所要 15〜20分 ／ こわい演出はありません</p>
+    <div id="turnstilebox">
+      <div class="cf-turnstile"
+           data-sitekey="__TURNSTILE_SITE_KEY__"
+           data-callback="onTurnstileOK"
+           data-expired-callback="onTurnstileExpired"
+           data-error-callback="onTurnstileExpired"></div>
+    </div>
+    <button id="enter" disabled>扉の前に立つ</button>
+    <button id="resume" class="pill" style="display:none">つづきから、扉の前へ</button>
+    <div id="caps">……</div>
+  </div>
+
+  <div class="overlay gone" id="fin">
+    <div class="name">扉は、ひらきました</div>
+    <p>扉のむこうへ行ったあと、すきまに小さな紙きれが残っています。</p>
+    <div id="letterview"><div id="lettertext"></div></div>
+    <div class="btns">
+      <button id="letterbtn" class="pill">扉のすきまに——紙きれがある</button>
+      <button id="savebtn" class="pill">記録をのこす (.txt)</button>
+      <button id="finlog" class="pill">ことばの記録を読む</button>
+      <button id="replay" class="pill">もういちど、扉の前へ</button>
+    </div>
+    <p class="meta">『扉のむこうの少女』</p>
+  </div>
+
+<script>
+const $=id=>document.getElementById(id);
+const kp=$('kp'), hint=$('hint'), sayEl=$('say'), thinking=$('thinking');
+const SILENCE_TEXT='（来訪者は、黙ってそこにいる）';
+let token=null, history=[], stage=0, turns=0, opened=false, busy=false, done=false;
+let logEntries=[], letterText=null, turnstileToken='', girlName='扉のむこう';
+let voices=[], chosenVoice=null;
+
+window.onTurnstileOK=t=>{turnstileToken=t;$('enter').disabled=false;$('caps').textContent='……'};
+window.onTurnstileExpired=()=>{turnstileToken='';$('enter').disabled=true};
+
+const store={get:(k,d)=>{try{const v=localStorage.getItem('door_web_'+k);return v===null?d:JSON.parse(v)}catch(_){return d}},
+             set:(k,v)=>{try{localStorage.setItem('door_web_'+k,JSON.stringify(v))}catch(_){}}};
+let volume=store.get('vol',0.9), voiceOn=store.get('voice',true), fastText=store.get('fast',false);
+$('vol').value=Math.round(volume*100);
+$('vol').oninput=e=>{volume=e.target.value/100;store.set('vol',volume)};
+const voicesw=$('voicesw');
+function paintVoiceSw(){voicesw.textContent=voiceOn?'ON':'OFF';voicesw.classList.toggle('on',voiceOn)}
+voicesw.onclick=()=>{voiceOn=!voiceOn;store.set('voice',voiceOn);if(!voiceOn&&'speechSynthesis'in window)speechSynthesis.cancel();paintVoiceSw()};paintVoiceSw();
+const speedsw=$('speedsw');
+function paintSpeedSw(){speedsw.textContent=fastText?'はやい':'ふつう';speedsw.classList.toggle('on',fastText)}
+speedsw.onclick=()=>{fastText=!fastText;store.set('fast',fastText);paintSpeedSw()};paintSpeedSw();
+$('setbtn').onclick=()=>$('settings').classList.toggle('open');
+document.addEventListener('click',e=>{if(!$('settings').contains(e.target)&&e.target.id!=='setbtn')$('settings').classList.remove('open')});
+
+function refreshVoices(){
+  if(!('speechSynthesis'in window))return;
+  voices=speechSynthesis.getVoices();
+  chosenVoice=voices.find(v=>/^ja[-_]/i.test(v.lang))||voices.find(v=>/Japanese|Kyoko|Otoya|Haruka/i.test(v.name))||null;
+}
+if('speechSynthesis'in window){refreshVoices();speechSynthesis.onvoiceschanged=refreshVoices}
+function readingText(text){return String(text||'').replaceAll('綾'+'香','アヤカ')}
+function speak(text){
+  return new Promise(res=>{
+    if(!voiceOn||!('speechSynthesis'in window)||!text){res();return}
+    const u=new SpeechSynthesisUtterance(readingText(text));
+    u.lang='ja-JP';u.volume=volume;u.rate=fastText?1.08:.92;u.pitch=1.05;if(chosenVoice)u.voice=chosenVoice;
+    let doneSpeaking=false;const finish=()=>{if(!doneSpeaking){doneSpeaking=true;res()}};
+    u.onend=finish;u.onerror=finish;speechSynthesis.cancel();speechSynthesis.speak(u);setTimeout(finish,30000);
+  });
+}
+
+const logBody=$('logbody');
+function addLog(who,text,persist=true){
+  if(!text)return;
+  const d=document.createElement('div');d.className='turn'+(who==='you'?' you':'');
+  d.innerHTML='<div class="who"></div><div class="what"></div>';
+  d.querySelector('.who').textContent=who==='you'?'あなた':girlName;
+  d.querySelector('.what').textContent=text;
+  logBody.appendChild(d);logBody.scrollTop=logBody.scrollHeight;
+  logEntries.push({who,text});if(persist)saveState();
+}
+$('logbtn').onclick=()=>$('log').classList.toggle('open');
+$('logclose').onclick=()=>$('log').classList.remove('open');
+
+const CHIP_POOL=[
+  'こんにちは。きこえますか?','今日ね、こんなことがあって——','すきな食べものの話、しようか',
+  '夏のおもいで、ある?','あなたのこと、おしえて','いま、どんな気持ち?',
+  'わたしの名前はね——','雨の日って、すき?','学校って、行ってた?',
+  'すきな言葉、ある?','そっちは、どんなところ?','最近うれしかったこと、話すね'
+];
+function refreshChips(){
+  const box=$('chips');box.innerHTML='';
+  const pool=[...CHIP_POOL];
+  for(let i=0;i<3&&pool.length;i++){
+    const t=pool.splice(Math.floor(Math.random()*pool.length),1)[0];
+    const b=document.createElement('button');b.className='chip';b.textContent=t;
+    b.onclick=()=>{sayEl.value=t.replace(/——$/,'');sayEl.focus()};
+    box.appendChild(b);
+  }
+}
+
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function setKP(t){kp.classList.remove('show');return new Promise(r=>setTimeout(()=>{kp.textContent=t;kp.classList.add('show');r()},320))}
+function setBeat(n){stage=Math.max(0,Math.min(n||0,5));document.body.setAttribute('data-beat',String(stage))}
+function setMood(m){document.body.setAttribute('data-mood',m||'calm')}
+function setDots(n){document.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('lit',i<n))}
+function showThinking(b){thinking.classList.toggle('show',b)}
+function chunks(text,maxlen=15){
+  text=String(text||'').trim();if(!text)return[];
+  const parts=text.split(/(?<=[。、！？…」』）])/u);
+  const out=[];let buf='';
+  for(let s of parts){
+    if(!s)continue;
+    while(s.length>maxlen){if(buf){out.push(buf);buf=''}out.push(s.slice(0,maxlen));s=s.slice(maxlen)}
+    if(buf.length+s.length<=maxlen)buf+=s;else{if(buf)out.push(buf);buf=s}
+  }
+  if(buf)out.push(buf);return out.length?out:[text.slice(0,maxlen)];
+}
+async function present(d){
+  if(d.stage!=null){setBeat(d.stage);setDots(d.stage)}
+  if(d.mood)setMood(d.mood);
+  if(d.opened){opened=true;document.body.classList.add('open')}
+  const segs=chunks(d.narration||'');
+  for(let i=0;i<segs.length;i++){
+    await setKP(segs[i]);
+    const minDelay=fastText?180:260+segs[i].length*56;
+    await Promise.all([speak(segs[i]),sleep(minDelay)]);
+    if(i<segs.length-1)await sleep(fastText?120:360);
+  }
+  addLog('girl',d.narration);
+}
+
+function saveState(){
+  if(!token)return;
+  store.set('state',{token,history,stage,turns,opened,done,logEntries,letterText,updatedAt:Date.now()});
+}
+function clearState(){store.set('state',null)}
+function restoreState(s){
+  token=s.token;history=Array.isArray(s.history)?s.history:[];stage=s.stage||0;turns=s.turns||0;
+  opened=!!s.opened;done=!!s.done;letterText=s.letterText||null;logEntries=[];
+  logBody.innerHTML='';
+  for(const m of (Array.isArray(s.logEntries)?s.logEntries:[]))addLog(m.who,m.text,false);
+  saveState();
+  setBeat(stage);setDots(stage);if(opened)document.body.classList.add('open');
+}
+
+async function loadCaps(){
+  try{
+    const d=await (await fetch('/health')).json();
+    $('engineline').textContent=d.engine==='claude'?'Web文字版':'設定待ち';
+    $('caps').textContent=d.engine==='claude'?'扉の前に立てます。':'サーバ設定が未完了です。';
+  }catch(_){
+    $('caps').textContent='サーバに接続できません。wrangler dev の起動を確認してください。';
+    $('enter').disabled=true;
+  }
+}
+async function start(){
+  if(!turnstileToken){$('caps').innerHTML='<span class="warn">扉の前に立つ準備がまだできていません。</span>';return}
+  $('enter').disabled=true;$('resume').disabled=true;
+  try{
+    const r=await fetch('/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({turnstileToken})});
+    const d=await safeJson(r);
+    if(r.status===503){$('caps').innerHTML='<span class="warn">'+escapeText(d.message||'本日の体験枠は終了しました。')+'</span>';return}
+    if(!r.ok)throw new Error(d.message||'start_failed');
+    token=d.token;history=[];stage=0;turns=0;opened=false;done=false;letterText=null;logEntries=[];logBody.innerHTML='';
+    clearState();saveState();
+    $('intro').classList.add('gone');
+    await setKP('……');
+    await present(d);
+    showControls('彼女に、話しかけてください。なんの話でも、いいんです');
+    refreshChips();saveState();
+  }catch(e){
+    $('caps').innerHTML='<span class="warn">'+escapeText(e.message||'扉の前に立てませんでした。もう一度どうぞ。')+'</span>';
+    $('enter').disabled=false;
+    try{turnstile.reset()}catch(_){}
+    turnstileToken='';
+  }
+}
+function showControls(h){$('controls').classList.remove('hidden');hint.textContent=h||'';if(window.innerWidth>700)sayEl.focus()}
+function hideControls(){$('controls').classList.add('hidden')}
+
+async function turn(text){
+  if(busy||!token||done)return;busy=true;
+  hideControls();$('settings').classList.remove('open');if('speechSynthesis'in window)speechSynthesis.cancel();
+  const spoken=text?text:SILENCE_TEXT;
+  if(text)addLog('you',text,false);else addLog('you','（……だまって、そこにいる）',false);
+  await setKP('……');showThinking(true);
+  try{
+    const r=await fetch('/turn',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,history,stage,turns,opened,text})});
+    const d=await safeJson(r);showThinking(false);
+    if(r.status===503){await setKP(d.message||'本日の体験枠は終了しました。また明日、扉の前へ。');return}
+    if(r.status===401||r.status===409){clearState();await setKP(d.message||'扉の合図が切れました。はじめからお試しください。');return}
+    if(r.status===429){clearState();await setKP(d.message||'この扉の前で話せる時間は、ここまでです。');return}
+    if(!r.ok)throw new Error(d.message||'turn_failed');
+    token=d.token||token;
+    history=history.concat({role:'user',content:spoken},{role:'assistant',content:d.narration||''});
+    turns=history.filter(m=>m.role==='user').length;stage=d.stage||stage;opened=!!d.opened;done=!!d.done;
+    saveState();
+    await present(d);
+    if(done){await ending();saveState()}
+    else{showControls('');refreshChips()}
+  }catch(_){
+    showThinking(false);
+    await setKP('……こえが、とおい。(通信に失敗しました。もう一度どうぞ)');
+    showControls('');
+  }finally{busy=false}
+}
+async function ending(){
+  await sleep(2400);
+  $('fin').classList.add('show');$('fin').classList.remove('gone');
+  requestAnimationFrame(()=>$('fin').style.opacity='1');
+}
+$('send').onclick=()=>{const v=sayEl.value.trim();sayEl.value='';if(v)turn(v)};
+sayEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){const v=sayEl.value.trim();sayEl.value='';if(v)turn(v)}});
+$('silent').onclick=()=>turn('');
+$('enter').onclick=start;
+$('replay').onclick=()=>{clearState();location.reload()};
+$('finlog').onclick=()=>{$('log').classList.add('open')};
+
+$('letterbtn').onclick=async()=>{
+  const btn=$('letterbtn');
+  if(letterText){$('letterview').classList.add('show');btn.style.display='none';return}
+  btn.disabled=true;btn.textContent='……そっと、ひらいています';
+  try{
+    const r=await fetch('/letter',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,history,stage,turns,opened})});
+    const d=await safeJson(r);
+    if(!r.ok)throw new Error(d.message||'letter_failed');
+    letterText=d.letter||'';
+    $('lettertext').textContent=letterText;
+    $('letterview').classList.add('show');
+    btn.style.display='none';
+    addLog('girl','〔扉のすきまに残されていた手紙〕\n'+letterText);
+    saveState();
+  }catch(e){btn.disabled=false;btn.textContent=e.message&&e.message!=='letter_failed'?e.message:'紙きれを、ひらく(もういちど)'}
+};
+
+$('savebtn').onclick=()=>{
+  const lines=[...document.querySelectorAll('#logbody .turn')].map(t=>
+    t.querySelector('.who').textContent+'｜'+t.querySelector('.what').textContent);
+  const txt='『扉のむこうの少女』 ことばの記録\n'+new Date().toLocaleString('ja-JP')+'\n'
+    +'──────────────────────\n\n'+lines.join('\n\n')+'\n\n──────────────────────\n';
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain;charset=utf-8'}));
+  a.download='扉のむこうの少女_記録_'+new Date().toISOString().slice(0,10)+'.txt';
+  a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+};
+
+function tryResume(){
+  const s=store.get('state',null);
+  if(!s||!s.token||s.done)return;
+  const b=$('resume');
+  b.style.display='inline-block';
+  b.textContent='つづきから、扉の前へ（おもいで '+(s.stage||0)+'/5）';
+  b.onclick=async()=>{
+    restoreState(s);
+    $('intro').classList.add('gone');
+    await setKP('……');
+    showControls('おかえりなさい。つづきを、どうぞ');
+    refreshChips();
+  };
+}
+async function safeJson(r){try{return await r.json()}catch(_){return {}}}
+function escapeText(s){const d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML}
+
+loadCaps().then(tryResume);
+</script>
+</body>
+</html>
