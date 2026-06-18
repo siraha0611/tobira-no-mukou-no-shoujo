@@ -136,6 +136,25 @@
   #enter:disabled{opacity:.45}
   #caps{color:var(--faint);font-size:11px;letter-spacing:.1em;line-height:2;min-height:2em;max-width:640px}
   #caps .warn{color:var(--danger)}
+  /* RP導入(初心者の入り口) */
+  #intro{justify-content:center}
+  #intro>:first-child{margin-top:0}
+  #intro>:last-child{margin-bottom:0}
+  .gstep{display:none;flex-direction:column;align-items:center;gap:20px}
+  .gstep.on{display:flex;animation:gfade 1.1s ease}
+  @keyframes gfade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .gkicker{font-family:var(--font-plex-mono),monospace;font-size:10px;letter-spacing:.4em;color:var(--faint);text-transform:uppercase}
+  .gh{font-size:clamp(21px,3.6vw,29px);font-weight:400;color:#d8d2c4;letter-spacing:.14em}
+  .gbody{color:#9a9384;font-size:14.5px;line-height:2.5;letter-spacing:.05em;max-width:min(88vw,540px);text-align:center}
+  .gbody em{color:var(--warm);font-style:normal}
+  .gnext{padding:14px 42px;letter-spacing:.22em;border:1px solid #3a3630;background:transparent;color:var(--ink);border-radius:30px;font-size:15px;cursor:pointer;transition:.3s;text-indent:.22em}
+  .gnext:hover{border-color:var(--gold);box-shadow:0 0 24px rgba(201,168,106,.15)}
+  .gsub{display:flex;gap:18px;align-items:center}
+  .gskip,.gback{background:none;border:none;color:var(--faint);font-size:12px;letter-spacing:.08em;cursor:pointer;padding:4px}
+  .gskip:hover,.gback:hover{color:var(--ink)}
+  .gdots{display:flex;gap:7px;margin-top:2px}
+  .gdots i{width:6px;height:6px;border-radius:50%;background:#34322c}
+  .gdots i.on{background:var(--warm)}
   #turnstilebox{min-height:70px;display:flex;align-items:center;justify-content:center}
 
   #fin{display:none}
@@ -196,24 +215,45 @@
   </div>
 
   <div class="overlay" id="intro">
-    <h1>扉のむこうの少女</h1>
-    <p class="lead">暗がりに、ふるい扉がひとつ。<br>むこうから、小さな声がします。</p>
-    <div id="steps">
-      <div><b>一、</b>扉の前に立つ</div>
-      <div><b>二、</b>なんでもいい、文字で話しかける</div>
-      <div><b>三、</b>彼女が思い出せたら——扉は、ひらく</div>
+    <!-- 1: RPって、なに? -->
+    <div class="gstep on" data-step="1">
+      <span class="gkicker">For first-timers</span>
+      <h2 class="gh">RPって、なに?</h2>
+      <p class="gbody">ロールプレイ（RP）は、物語のなかの“誰か”になったつもりで、話すこと。<br>
+        うまく演じる必要はありません。<br><em>「この子なら、どう言うかな」</em>を想像して、ひとこと返す——ただ、それだけです。</p>
+      <button class="gnext" data-go="2">次へ →</button>
+      <div class="gdots"><i class="on"></i><i></i><i></i></div>
+      <button class="gskip" data-go="3">RPに慣れている方は、そのまま扉へ →</button>
     </div>
-    <p class="meta">所要 15〜20分 ／ こわい演出はありません</p>
-    <div id="turnstilebox" style="display:none">
-      <div class="cf-turnstile"
-           data-sitekey="1x00000000000000000000AA"
-           data-callback="onTurnstileOK"
-           data-expired-callback="onTurnstileExpired"
-           data-error-callback="onTurnstileExpired"></div>
+    <!-- 2: 失敗はありません -->
+    <div class="gstep" data-step="2">
+      <span class="gkicker">Don't worry</span>
+      <h2 class="gh">失敗は、ありません</h2>
+      <p class="gbody">正解も、間違いもありません。短くていい——<br><em>「うれしい」「どうしよう」</em>だけでも、立派なRPです。<br>
+        迷ったら「迷ってる」と言っても、しばらく黙っていても、かまいません。</p>
+      <button class="gnext" data-go="3">わかった →</button>
+      <div class="gdots"><i></i><i class="on"></i><i></i></div>
+      <button class="gback" data-go="1">← もどる</button>
     </div>
-    <button id="enter">扉の前に立つ</button>
-    <button id="resume" class="pill" style="display:none">つづきから、扉の前へ</button>
-    <div id="caps">……</div>
+    <!-- 3: 扉の前(本編へ) -->
+    <div class="gstep" data-step="3">
+      <h1>扉のむこうの少女</h1>
+      <p class="lead">これから、扉のむこうの女の子と話します。<br>
+        何を話しても大丈夫。あなたの言葉が、彼女の記憶を呼びさまします。</p>
+      <p class="meta">所要 15〜20分 ／ こわい演出はありません</p>
+      <div id="turnstilebox" style="display:none">
+        <div class="cf-turnstile"
+             data-sitekey="1x00000000000000000000AA"
+             data-callback="onTurnstileOK"
+             data-expired-callback="onTurnstileExpired"
+             data-error-callback="onTurnstileExpired"></div>
+      </div>
+      <button id="enter">扉の前に立つ</button>
+      <button id="resume" class="pill" style="display:none">つづきから、扉の前へ</button>
+      <div class="gdots"><i></i><i></i><i class="on"></i></div>
+      <button class="gback" data-go="1">← RPの説明にもどる</button>
+      <div id="caps">……</div>
+    </div>
   </div>
 
   <div class="overlay gone" id="fin">
@@ -449,9 +489,16 @@ $('savebtn').onclick=()=>{
   a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);
 };
 
+// RP導入のステップ送り(RPって?→失敗ない→扉)
+function showGuideStep(n){
+  document.querySelectorAll('#intro .gstep').forEach(s=>s.classList.toggle('on', s.dataset.step===String(n)));
+}
+document.querySelectorAll('#intro [data-go]').forEach(b=>b.addEventListener('click',()=>showGuideStep(b.dataset.go)));
+
 function tryResume(){
   const s=store.get('state',null);
   if(!s||!s.token||s.done)return;
+  showGuideStep('3');  // つづきがある人はRP説明を飛ばして扉の前へ
   const b=$('resume');
   b.style.display='inline-block';
   b.textContent='つづきから、扉の前へ（おもいで '+(s.stage||0)+'/5）';
