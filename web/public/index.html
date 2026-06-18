@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>扉のむこうの少女</title>
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>
+<!-- v1はTurnstile無効(日次上限+トークン+ターン上限で保護)。本物導入時にこの行を復活:
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script> -->
 <style>
   :root{
     --ink:#e9e4d8; --dim:#7d7668; --faint:#46443e; --gold:#c9a86a;
@@ -203,14 +204,14 @@
       <div><b>三、</b>彼女が思い出せたら——扉は、ひらく</div>
     </div>
     <p class="meta">所要 15〜20分 ／ こわい演出はありません</p>
-    <div id="turnstilebox">
+    <div id="turnstilebox" style="display:none">
       <div class="cf-turnstile"
-           data-sitekey="__TURNSTILE_SITE_KEY__"
+           data-sitekey="1x00000000000000000000AA"
            data-callback="onTurnstileOK"
            data-expired-callback="onTurnstileExpired"
            data-error-callback="onTurnstileExpired"></div>
     </div>
-    <button id="enter" disabled>扉の前に立つ</button>
+    <button id="enter">扉の前に立つ</button>
     <button id="resume" class="pill" style="display:none">つづきから、扉の前へ</button>
     <div id="caps">……</div>
   </div>
@@ -356,7 +357,7 @@ async function loadCaps(){
   }
 }
 async function start(){
-  if(!turnstileToken){$('caps').innerHTML='<span class="warn">扉の前に立つ準備がまだできていません。</span>';return}
+  // v1はTurnstile任意。トークンが無くても進む(サーバ側がTURNSTILE_ENABLEDで判断)
   $('enter').disabled=true;$('resume').disabled=true;
   try{
     const r=await fetch('/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({turnstileToken})});

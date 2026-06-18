@@ -9,9 +9,13 @@ binding = "ASSETS"
 
 [[kv_namespaces]]
 binding = "DOOR_KV"
-id = "00000000000000000000000000000000"
-preview_id = "00000000000000000000000000000000"
+id = "c0fc91cb155b4248ac5abcdb822bfabf"
+preview_id = "c0fc91cb155b4248ac5abcdb822bfabf"
 
 [vars]
-DAILY_CALL_CAP = "600"
+# 暫定: 本物のTurnstile導入までの保険(最悪値を抑える)。導入後に上げてよい
+DAILY_CALL_CAP = "200"
 TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
+# v1はTurnstileを無効で公開(日次上限+セッショントークン+ターン上限で保護)。
+# 本物のTurnstile設定後に "true" にし、public/index.htmlのdata-sitekeyを実キーへ。
+TURNSTILE_ENABLED = "false"

@@ -4,6 +4,7 @@ export interface Env {
   SESSION_HMAC_SECRET?: string;
   DAILY_CALL_CAP?: string;
   TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_ENABLED?: string;
   DOOR_KV: KVNamespace;
   ASSETS: Fetcher;
 }
@@ -213,19 +214,27 @@ async function serveIndex(request: Request, env: Env): Promise<Response> {
 async function handleStart(request: Request, env: Env): Promise<Response> {
   const originError = enforceSameOrigin(request);
   if (originError) return originError;
-  if (!env.TURNSTILE_SECRET || !env.SESSION_HMAC_SECRET) {
+  if (!env.SESSION_HMAC_SECRET) {
     return jsonResponse({ error: "server_not_configured", message: "サーバ設定が未完了です。" }, 503, request);
   }
   const body = await readJsonBody(request);
   if (body instanceof Response) return body;
 
-  const turnstileToken = typeof body.turnstileToken === "string" ? body.turnstileToken : "";
-  if (!turnstileToken || !(await verifyTurnstile(env, turnstileToken, request.headers.get("CF-Connecting-IP") || ""))) {
-    return jsonResponse(
-      { error: "turnstile_failed", message: "扉の前に立てませんでした。もう一度お試しください。" },
-      403,
-      request,
-    );
+  // Turnstileは TURNSTILE_ENABLED="true" のときだけ検証する(任意・後付け可)。
+  // 無効時は日次上限＋HMACセッショントークン＋ターン上限が費用と濫用を抑える。
+  const turnstileOn = env.TURNSTILE_ENABLED === "true";
+  if (turnstileOn) {
+    if (!env.TURNSTILE_SECRET) {
+      return jsonResponse({ error: "server_not_configured", message: "サーバ設定が未完了です。" }, 503, request);
+    }
+    const turnstileToken = typeof body.turnstileToken === "string" ? body.turnstileToken : "";
+    if (!turnstileToken || !(await verifyTurnstile(env, turnstileToken, request.headers.get("CF-Connecting-IP") || ""))) {
+      return jsonResponse(
+        { error: "turnstile_failed", message: "扉の前に立てませんでした。もう一度お試しください。" },
+        403,
+        request,
+      );
+    }
   }
 
   if (!(await consumeDailyCall(env))) {
