@@ -295,7 +295,7 @@ window.onTurnstileExpired=()=>{turnstileToken='';$('enter').disabled=true};
 
 const store={get:(k,d)=>{try{const v=localStorage.getItem('door_web_'+k);return v===null?d:JSON.parse(v)}catch(_){return d}},
              set:(k,v)=>{try{localStorage.setItem('door_web_'+k,JSON.stringify(v))}catch(_){}}};
-let volume=store.get('vol',0.9), voiceOn=store.get('voice',true), fastText=store.get('fast',false);
+let volume=store.get('vol',0.9), voiceOn=store.get('voice',false), fastText=store.get('fast',false); /* 声は既定OFF=opt-in(Aivis課金対策・聴きたい人だけON) */
 $('vol').value=Math.round(volume*100);
 $('vol').oninput=e=>{volume=e.target.value/100;store.set('vol',volume)};
 const micBtn=$('mic');
