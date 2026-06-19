@@ -84,6 +84,13 @@
     font-family:inherit;font-size:16px;padding:13px 18px;border-radius:30px;outline:none;transition:border .2s;min-width:0}
   #say:focus{border-color:#56503f}
   #say::placeholder{color:#54505c}
+  #mic{display:none;align-items:center;justify-content:center;gap:7px;min-width:58px;padding:13px 14px;color:var(--dim)}
+  #mic.ready{display:flex}
+  #mic:hover{color:var(--ink)}
+  #mic .micdot{width:6px;height:6px;border-radius:50%;background:var(--faint);transition:.2s}
+  #mic.listening{border-color:var(--gold);color:var(--warm)}
+  #mic.listening .micdot{background:var(--warm);box-shadow:0 0 14px rgba(232,201,138,.45);animation:micpulse 1.1s ease-in-out infinite}
+  @keyframes micpulse{50%{opacity:.35;transform:scale(.72)}}
   button{font-family:inherit;cursor:pointer}
   .pill{border-radius:30px;border:1px solid var(--line);background:rgba(20,18,26,.9);
     color:var(--ink);padding:13px 18px;font-size:15px;transition:.2s;white-space:nowrap}
@@ -170,6 +177,8 @@
     #panel{top:56%}
     #chips .chip:nth-child(3){display:none}
     .pill{padding:13px 15px}
+    #mic{min-width:46px;padding:13px}
+    #mic .miclabel{display:none}
   }
 </style>
 </head>
@@ -199,6 +208,7 @@
     <div id="chips" title="話すことに迷ったら"></div>
     <div id="row">
       <input id="say" type="text" placeholder="扉のむこうへ、話しかける" autocomplete="off" maxlength="1000">
+      <button class="pill" id="mic" type="button" title="声で入力" aria-label="声で入力" aria-pressed="false"><span class="micdot"></span><span class="miclabel">声</span></button>
       <button class="pill" id="send">送る</button>
     </div>
     <div id="subrow"><button id="silent" title="何も言わずに、そこにいる">……だまって、そこにいる</button></div>
@@ -273,6 +283,7 @@
 <script>
 const $=id=>document.getElementById(id);
 const kp=$('kp'), hint=$('hint'), sayEl=$('say'), thinking=$('thinking');
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const SILENCE_TEXT='（来訪者は、黙ってそこにいる）';
 let token=null, history=[], stage=0, turns=0, opened=false, busy=false, done=false;
 let logEntries=[], letterText=null, turnstileToken='', girlName='扉のむこう';
@@ -286,6 +297,72 @@ const store={get:(k,d)=>{try{const v=localStorage.getItem('door_web_'+k);return 
 let volume=store.get('vol',0.9), voiceOn=store.get('voice',true), fastText=store.get('fast',false);
 $('vol').value=Math.round(volume*100);
 $('vol').oninput=e=>{volume=e.target.value/100;store.set('vol',volume)};
+const micBtn=$('mic');
+let micRecognition=null, micListening=false, micBaseText='', micIdleHint='', micErrorHint='', micHintTimer=null, micAudioCtx=null;
+function micBlip(kind){
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+    if(!micAudioCtx)micAudioCtx=new AC();
+    const ctx=micAudioCtx;
+    if(ctx.state==='suspended')ctx.resume().catch(()=>{});
+    const now=ctx.currentTime, osc=ctx.createOscillator(), gain=ctx.createGain();
+    const level=Math.max(0,Math.min(.045,volume*.045));
+    osc.type='sine';
+    osc.frequency.setValueAtTime(kind==='start'?660:440,now);
+    osc.frequency.exponentialRampToValueAtTime(kind==='start'?880:330,now+.12);
+    gain.gain.setValueAtTime(.0001,now);
+    gain.gain.linearRampToValueAtTime(level,now+.018);
+    gain.gain.exponentialRampToValueAtTime(.0001,now+.16);
+    osc.connect(gain).connect(ctx.destination);osc.start(now);osc.stop(now+.18);
+  }catch(_){}
+}
+function paintMic(on){
+  micListening=!!on;
+  micBtn.classList.toggle('listening',micListening);
+  micBtn.setAttribute('aria-pressed',micListening?'true':'false');
+}
+function briefMicHint(text){
+  clearTimeout(micHintTimer);hint.textContent=text;
+  micHintTimer=setTimeout(()=>{if(!micListening&&hint.textContent===text)hint.textContent=micIdleHint||''},3200);
+}
+function finishMic(rec){
+  if(micRecognition!==rec)return;
+  micRecognition=null;paintMic(false);micBlip('stop');
+  if(micErrorHint)briefMicHint(micErrorHint);else hint.textContent=micIdleHint||'';
+}
+function stopSpeechInput(){
+  if(!micRecognition){paintMic(false);return}
+  try{micRecognition.stop()}catch(_){try{micRecognition.abort()}catch(_){}finishMic(micRecognition)}
+}
+function startSpeechInput(){
+  if(!SR)return;
+  if(micRecognition||micListening){stopSpeechInput();return}
+  clearTimeout(micHintTimer);micBaseText=sayEl.value;micIdleHint=hint.textContent||'';micErrorHint='';
+  try{
+    const rec=new SR();micRecognition=rec;
+    rec.lang='ja-JP';rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=1;
+    rec.onstart=()=>{paintMic(true);hint.textContent='聞いています…話しかけてください';micBlip('start')};
+    rec.onresult=e=>{
+      let heard='';
+      for(let i=0;i<e.results.length;i++)heard+=(e.results[i][0]&&e.results[i][0].transcript)||'';
+      sayEl.value=micBaseText+heard;sayEl.focus();
+    };
+    rec.onerror=e=>{
+      const code=e&&e.error;
+      if(code==='not-allowed'||code==='service-not-allowed')micErrorHint='マイクが使えませんでした。文字入力でもどうぞ';
+      paintMic(false);
+      setTimeout(()=>finishMic(rec),0);
+    };
+    rec.onend=()=>finishMic(rec);
+    rec.start();
+  }catch(_){
+    micRecognition=null;paintMic(false);micErrorHint='マイクが使えませんでした。文字入力でもどうぞ';briefMicHint(micErrorHint);micBlip('stop');
+  }
+}
+if(SR){
+  micBtn.classList.add('ready');
+  micBtn.onclick=()=>{try{startSpeechInput()}catch(_){micRecognition=null;paintMic(false);briefMicHint('マイクが使えませんでした。文字入力でもどうぞ')}};
+}
 const voicesw=$('voicesw');
 function paintVoiceSw(){voicesw.textContent=voiceOn?'ON':'OFF';voicesw.classList.toggle('on',voiceOn)}
 voicesw.onclick=()=>{voiceOn=!voiceOn;store.set('voice',voiceOn);if(!voiceOn&&'speechSynthesis'in window)speechSynthesis.cancel();paintVoiceSw()};paintVoiceSw();
@@ -424,6 +501,7 @@ function hideControls(){$('controls').classList.add('hidden')}
 
 async function turn(text){
   if(busy||!token||done)return;busy=true;
+  stopSpeechInput();
   hideControls();$('settings').classList.remove('open');if('speechSynthesis'in window)speechSynthesis.cancel();
   const spoken=text?text:SILENCE_TEXT;
   if(text)addLog('you',text,false);else addLog('you','（……だまって、そこにいる）',false);

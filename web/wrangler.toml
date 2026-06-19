@@ -13,8 +13,10 @@ id = "c0fc91cb155b4248ac5abcdb822bfabf"
 preview_id = "c0fc91cb155b4248ac5abcdb822bfabf"
 
 [vars]
-# 暫定: 本物のTurnstile導入までの保険(最悪値を抑える)。導入後に上げてよい
-DAILY_CALL_CAP = "200"
+# コスト上限: KASO「月$5まで」(2026-06-18)。/start・/turn・/letter全てがJST日次でカウントされ、
+# cap到達で503。保守的見積(最悪¥0.5/call)でも 50×30×¥0.5≒¥750≒$5/月 に収まる安全側設定。
+# ※Anthropic Console側の月$5ハード上限(要KASOログイン)を併設したら、launch用に引き上げ可。
+DAILY_CALL_CAP = "50"
 TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 # v1はTurnstileを無効で公開(日次上限+セッショントークン+ターン上限で保護)。
 # 本物のTurnstile設定後に "true" にし、public/index.htmlのdata-sitekeyを実キーへ。
