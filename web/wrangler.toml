@@ -12,6 +12,20 @@ binding = "DOOR_KV"
 id = "c0fc91cb155b4248ac5abcdb822bfabf"
 preview_id = "c0fc91cb155b4248ac5abcdb822bfabf"
 
+# Research D1 setup is optional and must stay commented until the database exists,
+# otherwise wrangler deploy will fail on a placeholder database_id.
+# 1. npx wrangler d1 create tobira_research
+# 2. Paste the returned database_id below.
+# 3. Uncomment this [[d1_databases]] block.
+# 4. npx wrangler d1 migrations apply tobira_research --remote
+# 5. npx wrangler deploy
+#
+# [[d1_databases]]
+# binding = "RESEARCH_DB"
+# database_name = "tobira_research"
+# database_id = "<paste-after-create>"
+# migrations_dir = "migrations"
+
 [vars]
 # コスト上限: KASO「月$5まで」(2026-06-18)。/start・/turn・/letter全てがJST日次でカウントされ、
 # cap到達で503。保守的見積(最悪¥0.5/call)でも 50×30×¥0.5≒¥750≒$5/月 に収まる安全側設定。
@@ -25,3 +39,5 @@ TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 # v1はTurnstileを無効で公開(日次上限+セッショントークン+ターン上限で保護)。
 # 本物のTurnstile設定後に "true" にし、public/index.htmlのdata-sitekeyを実キーへ。
 TURNSTILE_ENABLED = "false"
+# Transcript capture is opt-in for research sessions; leave unset or "false" by default.
+# RESEARCH_TRANSCRIPT = "false"

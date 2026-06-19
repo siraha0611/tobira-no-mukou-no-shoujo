@@ -144,6 +144,10 @@
   #enter:disabled{opacity:.45}
   #caps{color:var(--faint);font-size:11px;letter-spacing:.1em;line-height:2;min-height:2em;max-width:640px}
   #caps .warn{color:var(--danger)}
+  #research{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8d8678;font-size:11px;letter-spacing:.08em;line-height:1.8}
+  #research[hidden]{display:none}
+  #researchbadge{color:var(--warm);border:1px solid #3a3630;border-radius:18px;padding:3px 10px;letter-spacing:.12em}
+  #research .privacy{color:var(--dim);max-width:min(88vw,520px)}
   /* RP導入(初心者の入り口) */
   #intro{justify-content:center}
   #intro>:first-child{margin-top:0}
@@ -251,6 +255,10 @@
       <p class="lead"><em>まずは、あなたのままで、</em><br>
         扉のむこうの少女と、お話をしてみましょう。<br>
         何を話しても大丈夫。あなたの言葉が、彼女の記憶を呼びさまします。</p>
+      <div id="research" hidden>
+        <span id="researchbadge"></span>
+        <span class="privacy">※体験中、本名や連絡先などの個人情報は入力しないでください</span>
+      </div>
       <p class="meta">所要 15〜20分 ／ こわい演出はありません</p>
       <div id="turnstilebox" style="display:none">
         <div class="cf-turnstile"
@@ -285,16 +293,23 @@ const $=id=>document.getElementById(id);
 const kp=$('kp'), hint=$('hint'), sayEl=$('say'), thinking=$('thinking');
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const SILENCE_TEXT='（来訪者は、黙ってそこにいる）';
+const researchParticipantId=(new URLSearchParams(location.search).get('pid')||'').trim();
+const researchMode=researchParticipantId.length>0;
 let token=null, history=[], stage=0, turns=0, opened=false, busy=false, done=false;
 let logEntries=[], letterText=null, turnstileToken='', girlName='扉のむこう';
 let voices=[], chosenVoice=null;
 let aivisAudio=null, aivisAudioUrl='', finishAivisPlayback=null, voiceCancelSeq=0;
+let activeParticipantId=researchMode?researchParticipantId:'';
 
 window.onTurnstileOK=t=>{turnstileToken=t;$('enter').disabled=false;$('caps').textContent='……'};
 window.onTurnstileExpired=()=>{turnstileToken='';$('enter').disabled=true};
 
 const store={get:(k,d)=>{try{const v=localStorage.getItem('door_web_'+k);return v===null?d:JSON.parse(v)}catch(_){return d}},
              set:(k,v)=>{try{localStorage.setItem('door_web_'+k,JSON.stringify(v))}catch(_){}}};
+if(researchMode){
+  $('researchbadge').textContent='研究モード: '+researchParticipantId;
+  $('research').hidden=false;
+}
 let volume=store.get('vol',0.9), voiceOn=store.get('voice',false), fastText=store.get('fast',false); /* 声は既定OFF=opt-in(Aivis課金対策・聴きたい人だけON) */
 $('vol').value=Math.round(volume*100);
 $('vol').oninput=e=>{volume=e.target.value/100;store.set('vol',volume)};
@@ -507,10 +522,14 @@ async function present(d){
 
 function saveState(){
   if(!token)return;
-  store.set('state',{token,history,stage,turns,opened,done,logEntries,letterText,updatedAt:Date.now()});
+  const state={token,history,stage,turns,opened,done,logEntries,letterText,updatedAt:Date.now()};
+  if(activeParticipantId)state.participantId=activeParticipantId;
+  store.set('state',state);
 }
 function clearState(){store.set('state',null)}
+function stateParticipantId(s){return s&&typeof s.participantId==='string'?s.participantId.trim():''}
 function restoreState(s){
+  activeParticipantId=stateParticipantId(s);
   token=s.token;history=Array.isArray(s.history)?s.history:[];stage=s.stage||0;turns=s.turns||0;
   opened=!!s.opened;done=!!s.done;letterText=s.letterText||null;logEntries=[];
   logBody.innerHTML='';
@@ -533,11 +552,14 @@ async function start(){
   // v1はTurnstile任意。トークンが無くても進む(サーバ側がTURNSTILE_ENABLEDで判断)
   $('enter').disabled=true;$('resume').disabled=true;
   try{
-    const r=await fetch('/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({turnstileToken})});
+    const startBody={turnstileToken};
+    if(researchMode)startBody.participantId=researchParticipantId;
+    const r=await fetch('/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(startBody)});
     const d=await safeJson(r);
     if(r.status===503){$('caps').innerHTML='<span class="warn">'+escapeText(d.message||'本日の体験枠は終了しました。')+'</span>';return}
     if(!r.ok)throw new Error(d.message||'start_failed');
     token=d.token;history=[];stage=0;turns=0;opened=false;done=false;letterText=null;logEntries=[];logBody.innerHTML='';
+    activeParticipantId=researchMode?researchParticipantId:'';
     clearState();saveState();
     $('intro').classList.add('gone');
     await setKP('……');
@@ -632,6 +654,8 @@ document.querySelectorAll('#intro [data-go]').forEach(b=>b.addEventListener('cli
 function tryResume(){
   const s=store.get('state',null);
   if(!s||!s.token||s.done)return;
+  const savedParticipantId=stateParticipantId(s);
+  if(researchMode?savedParticipantId!==researchParticipantId:savedParticipantId)return;
   showGuideStep('3');  // つづきがある人はRP説明を飛ばして扉の前へ
   const b=$('resume');
   b.style.display='inline-block';

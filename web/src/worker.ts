@@ -10,6 +10,8 @@ export interface Env {
   AIVIS_STYLE_ID?: string;
   AIVIS_TTS_ENABLED?: string;
   AIVIS_DAILY_CHAR_CAP?: string;
+  RESEARCH_DB?: D1Database;
+  RESEARCH_TRANSCRIPT?: string;
   DOOR_KV: KVNamespace;
   ASSETS: Fetcher;
 }
@@ -24,6 +26,8 @@ type HistoryMessage = {
 type SessionTokenPayload = {
   v: 1;
   sid: string;
+  participantId?: string;
+  startedAt?: string;
   iat: number;
   maxTurns: number;
   turns: number;
@@ -52,6 +56,7 @@ const MAX_HISTORY_MESSAGES = 60;
 const MAX_HISTORY_ITEM_CHARS = 2000;
 const MAX_HISTORY_TOTAL_CHARS = 60000;
 const MAX_JSON_BODY_BYTES = 90000;
+const MAX_PARTICIPANT_ID_CHARS = 128;
 const DAILY_LIMIT_MESSAGE = "本日の体験枠は終了しました。また明日、扉の前へ。";
 const SILENCE_TEXT = "（来訪者は、黙ってそこにいる）";
 const DEFAULT_TURNSTILE_SITE_KEY = "1x00000000000000000000AA";
@@ -256,9 +261,13 @@ async function handleStart(request: Request, env: Env): Promise<Response> {
     return jsonResponse({ error: "daily_limit", message: DAILY_LIMIT_MESSAGE }, 503, request);
   }
 
+  const participantId = normalizeParticipantId(body.participantId);
+  const startedAt = participantId ? new Date().toISOString() : undefined;
   const history: HistoryMessage[] = [];
   const token = await issueStateToken(env, {
     sid: randomId(),
+    participantId,
+    startedAt,
     turns: 0,
     stage: 0,
     opened: false,
@@ -267,6 +276,10 @@ async function handleStart(request: Request, env: Env): Promise<Response> {
   });
   if (!token) {
     return jsonResponse({ error: "server_not_configured", message: "サーバ設定が未完了です。" }, 503, request);
+  }
+
+  if (participantId && startedAt) {
+    await logResearchStart(env, participantId, startedAt);
   }
 
   return jsonResponse(
@@ -324,6 +337,8 @@ async function handleTurn(request: Request, env: Env): Promise<Response> {
   );
   const nextToken = await issueStateToken(env, {
     sid: tokenResult.sid,
+    participantId: tokenResult.participantId,
+    startedAt: tokenResult.startedAt,
     turns,
     stage: guarded.stage,
     opened: guarded.opened,
@@ -332,6 +347,10 @@ async function handleTurn(request: Request, env: Env): Promise<Response> {
   });
   if (!nextToken) {
     return jsonResponse({ error: "server_not_configured", message: "サーバ設定が未完了です。" }, 503, request);
+  }
+
+  if (tokenResult.participantId) {
+    await logResearchTurn(env, tokenResult, turns, guarded.stage, guarded.opened || guarded.done, nextHistory);
   }
 
   return jsonResponse({ ...guarded, token: nextToken }, 200, request);
@@ -617,6 +636,91 @@ function trailingSilenceCount(history: HistoryMessage[]): number {
   return count;
 }
 
+function normalizeParticipantId(value: unknown): string | undefined {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text ? text.slice(0, MAX_PARTICIPANT_ID_CHARS) : undefined;
+}
+
+function formatTranscript(history: HistoryMessage[]): string {
+  return history
+    .map((message) => `${message.role === "user" ? "user" : "assistant"}: ${message.content}`)
+    .join("\n\n");
+}
+
+function durationSeconds(startedAt: string | undefined, endedAtMs: number): number | null {
+  const startedAtMs = Date.parse(startedAt || "");
+  if (!Number.isFinite(startedAtMs)) return null;
+  return Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
+}
+
+async function logResearchStart(env: Env, participantId: string | undefined, startedAt: string): Promise<void> {
+  if (!participantId) return;
+  if (!env.RESEARCH_DB) return;
+  try {
+    await env.RESEARCH_DB.prepare(
+      "INSERT OR REPLACE INTO sessions (participant_id, started_at, turns, max_stage, ended, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind(participantId, startedAt, 0, 0, 0, startedAt)
+      .run();
+  } catch {
+    // Research logging must never affect play.
+  }
+}
+
+async function logResearchTurn(
+  env: Env,
+  token: SessionTokenPayload,
+  turns: number,
+  stage: number,
+  ended: boolean,
+  history: HistoryMessage[],
+): Promise<void> {
+  const participantId = token.participantId;
+  if (!participantId) return;
+  if (!env.RESEARCH_DB) return;
+
+  try {
+    const maxStage = clampInt(stage, 0, 5);
+    const transcript = env.RESEARCH_TRANSCRIPT === "true" ? formatTranscript(history) : null;
+
+    if (ended) {
+      const endedAt = new Date();
+      const endedAtIso = endedAt.toISOString();
+      const durationSec = durationSeconds(token.startedAt, endedAt.getTime());
+      if (transcript !== null) {
+        await env.RESEARCH_DB.prepare(
+          "UPDATE sessions SET turns = ?, max_stage = MAX(COALESCE(max_stage, 0), ?), ended_at = ?, duration_sec = ?, ended = 1, transcript = ? WHERE participant_id = ?",
+        )
+          .bind(turns, maxStage, endedAtIso, durationSec, transcript, participantId)
+          .run();
+      } else {
+        await env.RESEARCH_DB.prepare(
+          "UPDATE sessions SET turns = ?, max_stage = MAX(COALESCE(max_stage, 0), ?), ended_at = ?, duration_sec = ?, ended = 1 WHERE participant_id = ?",
+        )
+          .bind(turns, maxStage, endedAtIso, durationSec, participantId)
+          .run();
+      }
+      return;
+    }
+
+    if (transcript !== null) {
+      await env.RESEARCH_DB.prepare(
+        "UPDATE sessions SET turns = ?, max_stage = MAX(COALESCE(max_stage, 0), ?), transcript = ? WHERE participant_id = ?",
+      )
+        .bind(turns, maxStage, transcript, participantId)
+        .run();
+    } else {
+      await env.RESEARCH_DB.prepare(
+        "UPDATE sessions SET turns = ?, max_stage = MAX(COALESCE(max_stage, 0), ?) WHERE participant_id = ?",
+      )
+        .bind(turns, maxStage, participantId)
+        .run();
+    }
+  } catch {
+    // Research logging must never affect play.
+  }
+}
+
 async function issueStateToken(
   env: Env,
   state: Omit<SessionTokenPayload, "v" | "iat" | "maxTurns" | "h"> & { history: HistoryMessage[] },
@@ -633,6 +737,8 @@ async function issueStateToken(
     done: Boolean(state.done),
     h: await hashHistory(state.history),
   };
+  if (state.participantId) payload.participantId = state.participantId;
+  if (state.startedAt) payload.startedAt = state.startedAt;
   return signToken(payload, env.SESSION_HMAC_SECRET);
 }
 
@@ -687,6 +793,8 @@ async function verifyToken(token: string, secret: string): Promise<SessionTokenP
     ) {
       return null;
     }
+    if (payload.participantId !== undefined && typeof payload.participantId !== "string") return null;
+    if (payload.startedAt !== undefined && typeof payload.startedAt !== "string") return null;
     return payload as SessionTokenPayload;
   } catch {
     return null;
