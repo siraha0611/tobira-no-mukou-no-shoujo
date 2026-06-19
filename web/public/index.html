@@ -288,6 +288,7 @@ const SILENCE_TEXT='（来訪者は、黙ってそこにいる）';
 let token=null, history=[], stage=0, turns=0, opened=false, busy=false, done=false;
 let logEntries=[], letterText=null, turnstileToken='', girlName='扉のむこう';
 let voices=[], chosenVoice=null;
+let aivisAudio=null, aivisAudioUrl='', finishAivisPlayback=null, voiceCancelSeq=0;
 
 window.onTurnstileOK=t=>{turnstileToken=t;$('enter').disabled=false;$('caps').textContent='……'};
 window.onTurnstileExpired=()=>{turnstileToken='';$('enter').disabled=true};
@@ -365,7 +366,7 @@ if(SR){
 }
 const voicesw=$('voicesw');
 function paintVoiceSw(){voicesw.textContent=voiceOn?'ON':'OFF';voicesw.classList.toggle('on',voiceOn)}
-voicesw.onclick=()=>{voiceOn=!voiceOn;store.set('voice',voiceOn);if(!voiceOn&&'speechSynthesis'in window)speechSynthesis.cancel();paintVoiceSw()};paintVoiceSw();
+voicesw.onclick=()=>{voiceOn=!voiceOn;store.set('voice',voiceOn);if(!voiceOn)stopVoicePlayback();paintVoiceSw()};paintVoiceSw();
 const speedsw=$('speedsw');
 function paintSpeedSw(){speedsw.textContent=fastText?'はやい':'ふつう';speedsw.classList.toggle('on',fastText)}
 speedsw.onclick=()=>{fastText=!fastText;store.set('fast',fastText);paintSpeedSw()};paintSpeedSw();
@@ -379,14 +380,64 @@ function refreshVoices(){
 }
 if('speechSynthesis'in window){refreshVoices();speechSynthesis.onvoiceschanged=refreshVoices}
 function readingText(text){return String(text||'').replaceAll('綾'+'香','アヤカ').replaceAll('妖','あやかし')}
-function speak(text){
+function cleanupAivisAudio(){
+  if(aivisAudio){
+    aivisAudio.onended=null;aivisAudio.onerror=null;
+    try{aivisAudio.pause();aivisAudio.currentTime=0}catch(_){}
+    try{aivisAudio.removeAttribute('src');aivisAudio.load()}catch(_){}
+  }
+  if(aivisAudioUrl){URL.revokeObjectURL(aivisAudioUrl);aivisAudioUrl=''}
+}
+function stopAivisAudio(){
+  const finish=finishAivisPlayback;
+  if(finish){finishAivisPlayback=null;finish(false);return}
+  cleanupAivisAudio();
+}
+function stopVoicePlayback(){
+  voiceCancelSeq++;
+  stopAivisAudio();
+  if('speechSynthesis'in window)speechSynthesis.cancel();
+}
+async function tryAivisSpeech(reading){
+  try{
+    const r=await fetch('/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:reading})});
+    if(!r.ok)return false;
+    const blob=await r.blob();
+    if(!aivisAudio)aivisAudio=new Audio();
+    stopAivisAudio();
+    aivisAudioUrl=URL.createObjectURL(blob);
+    aivisAudio.volume=volume;
+    aivisAudio.src=aivisAudioUrl;
+    return await new Promise(res=>{
+      let donePlaying=false;
+      const finish=ok=>{
+        if(donePlaying)return;
+        donePlaying=true;finishAivisPlayback=null;cleanupAivisAudio();res(ok);
+      };
+      finishAivisPlayback=finish;
+      aivisAudio.onended=()=>finish(true);
+      aivisAudio.onerror=()=>finish(false);
+      const p=aivisAudio.play();
+      if(p&&typeof p.catch==='function')p.catch(()=>finish(false));
+    });
+  }catch(_){return false}
+}
+function speakBrowser(reading){
   return new Promise(res=>{
-    if(!voiceOn||!('speechSynthesis'in window)||!text){res();return}
-    const u=new SpeechSynthesisUtterance(readingText(text));
+    if(!voiceOn||!('speechSynthesis'in window)||!reading){res();return}
+    const u=new SpeechSynthesisUtterance(reading);
     u.lang='ja-JP';u.volume=volume;u.rate=fastText?1.08:.92;u.pitch=1.05;if(chosenVoice)u.voice=chosenVoice;
     let doneSpeaking=false;const finish=()=>{if(!doneSpeaking){doneSpeaking=true;res()}};
-    u.onend=finish;u.onerror=finish;speechSynthesis.cancel();speechSynthesis.speak(u);setTimeout(finish,30000);
+    u.onend=finish;u.onerror=finish;stopVoicePlayback();speechSynthesis.speak(u);setTimeout(finish,30000);
   });
+}
+async function speak(text){
+  if(!voiceOn||!text)return;
+  const reading=readingText(text);
+  const cancelSeq=voiceCancelSeq;
+  if(await tryAivisSpeech(reading))return;
+  if(!voiceOn||cancelSeq!==voiceCancelSeq)return;
+  await speakBrowser(reading);
 }
 
 const logBody=$('logbody');
@@ -502,7 +553,7 @@ function hideControls(){$('controls').classList.add('hidden')}
 async function turn(text){
   if(busy||!token||done)return;busy=true;
   stopSpeechInput();
-  hideControls();$('settings').classList.remove('open');if('speechSynthesis'in window)speechSynthesis.cancel();
+  hideControls();$('settings').classList.remove('open');stopVoicePlayback();
   const spoken=text?text:SILENCE_TEXT;
   if(text)addLog('you',text,false);else addLog('you','（……だまって、そこにいる）',false);
   await setKP('……');showThinking(true);

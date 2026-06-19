@@ -17,6 +17,9 @@ preview_id = "c0fc91cb155b4248ac5abcdb822bfabf"
 # cap到達で503。保守的見積(最悪¥0.5/call)でも 50×30×¥0.5≒¥750≒$5/月 に収まる安全側設定。
 # ※Anthropic Console側の月$5ハード上限(要KASOログイン)を併設したら、launch用に引き上げ可。
 DAILY_CALL_CAP = "50"
+AIVIS_TTS_ENABLED = "true"
+AIVIS_MODEL_UUID = "22e8ed77-94fe-4ef2-871f-a86f94e9a579"
+AIVIS_DAILY_CHAR_CAP = "15000"
 TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 # v1はTurnstileを無効で公開(日次上限+セッショントークン+ターン上限で保護)。
 # 本物のTurnstile設定後に "true" にし、public/index.htmlのdata-sitekeyを実キーへ。

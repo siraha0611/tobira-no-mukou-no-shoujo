@@ -5,6 +5,10 @@ export interface Env {
   DAILY_CALL_CAP?: string;
   TURNSTILE_SITE_KEY?: string;
   TURNSTILE_ENABLED?: string;
+  AIVIS_API_KEY?: string;
+  AIVIS_MODEL_UUID?: string;
+  AIVIS_TTS_ENABLED?: string;
+  AIVIS_DAILY_CHAR_CAP?: string;
   DOOR_KV: KVNamespace;
   ASSETS: Fetcher;
 }
@@ -196,6 +200,10 @@ export default {
       return handleLetter(request, env);
     }
 
+    if (url.pathname === "/tts" && request.method === "POST") {
+      return handleTts(request, env);
+    }
+
     return jsonResponse({ error: "not_found" }, 404, request);
   },
 } satisfies ExportedHandler<Env>;
@@ -358,6 +366,60 @@ async function handleLetter(request: Request, env: Env): Promise<Response> {
   );
   const letter = sanitizeNarration(rawLetter.narration).trim() || FALLBACK_LETTER;
   return jsonResponse({ letter }, 200, request);
+}
+
+async function handleTts(request: Request, env: Env): Promise<Response> {
+  const originError = enforceSameOrigin(request);
+  if (originError) return originError;
+  const body = await readJsonBody(request);
+  if (body instanceof Response) return body;
+
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!text) {
+    return jsonResponse({ error: "invalid_text" }, 400, request);
+  }
+  if (text.length > 600) {
+    return jsonResponse({ error: "input_too_long" }, 413, request);
+  }
+
+  if (env.AIVIS_TTS_ENABLED !== "true" || !env.AIVIS_API_KEY || !env.AIVIS_MODEL_UUID) {
+    return new Response(null, { status: 503 });
+  }
+
+  try {
+    const key = `ttschars:${jstDateKey()}`;
+    const currentRaw = await env.DOOR_KV.get(key);
+    const current = Number.parseInt(currentRaw || "0", 10) || 0;
+    const cap = Number.parseInt(env.AIVIS_DAILY_CHAR_CAP || "15000", 10);
+    if (current + text.length > cap) {
+      return new Response(null, { status: 503 });
+    }
+
+    const resp = await fetch("https://api.aivis-project.com/v1/tts/synthesize", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.AIVIS_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model_uuid: env.AIVIS_MODEL_UUID,
+        text,
+        output_format: "mp3",
+        use_ssml: false,
+      }),
+    });
+    if (!resp.ok) {
+      return new Response(null, { status: 503 });
+    }
+
+    await env.DOOR_KV.put(key, String(current + text.length), { expirationTtl: secondsUntilNextJstDay() + 3600 });
+    return new Response(resp.body, {
+      status: 200,
+      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" },
+    });
+  } catch {
+    return new Response(null, { status: 503 });
+  }
 }
 
 function stageCap(prevStage: number, turns: number): number {
