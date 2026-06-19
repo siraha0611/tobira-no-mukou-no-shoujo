@@ -299,7 +299,7 @@ let volume=store.get('vol',0.9), voiceOn=store.get('voice',false), fastText=stor
 $('vol').value=Math.round(volume*100);
 $('vol').oninput=e=>{volume=e.target.value/100;store.set('vol',volume)};
 const micBtn=$('mic');
-let micRecognition=null, micListening=false, micBaseText='', micIdleHint='', micErrorHint='', micHintTimer=null, micAudioCtx=null;
+let micRecognition=null, micListening=false, micBaseText='', micIdleHint='', micErrorHint='', micHintTimer=null, micAudioCtx=null, micStopping=false;
 function micBlip(kind){
   try{
     const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
@@ -332,17 +332,18 @@ function finishMic(rec){
   if(micErrorHint)briefMicHint(micErrorHint);else hint.textContent=micIdleHint||'';
 }
 function stopSpeechInput(){
+  micStopping=true;
   if(!micRecognition){paintMic(false);return}
   try{micRecognition.stop()}catch(_){try{micRecognition.abort()}catch(_){}finishMic(micRecognition)}
 }
 function startSpeechInput(){
   if(!SR)return;
   if(micRecognition||micListening){stopSpeechInput();return}
-  clearTimeout(micHintTimer);micBaseText=sayEl.value;micIdleHint=hint.textContent||'';micErrorHint='';
+  clearTimeout(micHintTimer);micBaseText=sayEl.value;micIdleHint=hint.textContent||'';micErrorHint='';micStopping=false;
   try{
     const rec=new SR();micRecognition=rec;
-    rec.lang='ja-JP';rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=1;
-    rec.onstart=()=>{paintMic(true);hint.textContent='聞いています…話しかけてください';micBlip('start')};
+    rec.lang='ja-JP';rec.interimResults=true;rec.continuous=true;rec.maxAlternatives=1;
+    rec.onstart=()=>{const first=!micListening;paintMic(true);hint.textContent='聞いています…どうぞ（終わったら「声」を押して停止）';if(first)micBlip('start')};
     rec.onresult=e=>{
       let heard='';
       for(let i=0;i<e.results.length;i++)heard+=(e.results[i][0]&&e.results[i][0].transcript)||'';
@@ -350,11 +351,14 @@ function startSpeechInput(){
     };
     rec.onerror=e=>{
       const code=e&&e.error;
-      if(code==='not-allowed'||code==='service-not-allowed')micErrorHint='マイクが使えませんでした。文字入力でもどうぞ';
-      paintMic(false);
-      setTimeout(()=>finishMic(rec),0);
+      if(code==='not-allowed'||code==='service-not-allowed'||code==='audio-capture'){micErrorHint='マイクが使えませんでした。文字入力でもどうぞ';micStopping=true;}
+      else if(code==='network'){micErrorHint='通信が不安定なようです。文字入力でもどうぞ';micStopping=true;}
     };
-    rec.onend=()=>finishMic(rec);
+    rec.onend=()=>{
+      if(micStopping){finishMic(rec);return}
+      micBaseText=sayEl.value;
+      try{rec.start()}catch(_){finishMic(rec)}
+    };
     rec.start();
   }catch(_){
     micRecognition=null;paintMic(false);micErrorHint='マイクが使えませんでした。文字入力でもどうぞ';briefMicHint(micErrorHint);micBlip('stop');
