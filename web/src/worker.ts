@@ -7,6 +7,7 @@ export interface Env {
   TURNSTILE_ENABLED?: string;
   AIVIS_API_KEY?: string;
   AIVIS_MODEL_UUID?: string;
+  AIVIS_STYLE_ID?: string;
   AIVIS_TTS_ENABLED?: string;
   AIVIS_DAILY_CHAR_CAP?: string;
   DOOR_KV: KVNamespace;
@@ -406,6 +407,7 @@ async function handleTts(request: Request, env: Env): Promise<Response> {
         text,
         output_format: "mp3",
         use_ssml: false,
+        style_id: Number(env.AIVIS_STYLE_ID ?? 2) || 0,
       }),
     });
     if (!resp.ok) {
