@@ -12,19 +12,13 @@ binding = "DOOR_KV"
 id = "c0fc91cb155b4248ac5abcdb822bfabf"
 preview_id = "c0fc91cb155b4248ac5abcdb822bfabf"
 
-# Research D1 setup is optional and must stay commented until the database exists,
-# otherwise wrangler deploy will fail on a placeholder database_id.
-# 1. npx wrangler d1 create tobira_research
-# 2. Paste the returned database_id below.
-# 3. Uncomment this [[d1_databases]] block.
-# 4. npx wrangler d1 migrations apply tobira_research --remote
-# 5. npx wrangler deploy
-#
-# [[d1_databases]]
-# binding = "RESEARCH_DB"
-# database_name = "tobira_research"
-# database_id = "<paste-after-create>"
-# migrations_dir = "migrations"
+# Research D1: 有効化済み(2026-06-20)。研究モード(?pid=)時のみ書き込む。通常プレイは無影響。
+# ⚠️ database_id は実在DBの値。これを空/placeholderに戻すと deploy が壊れるので注意。
+[[d1_databases]]
+binding = "RESEARCH_DB"
+database_name = "tobira_research"
+database_id = "37d8544a-d407-47db-9dfc-2be4b5f798d2"
+migrations_dir = "migrations"
 
 [vars]
 # コスト上限: KASO「月$5まで」(2026-06-18)。/start・/turn・/letter全てがJST日次でカウントされ、
