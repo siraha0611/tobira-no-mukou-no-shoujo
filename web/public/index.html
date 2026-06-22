@@ -198,6 +198,7 @@
     </div>
     <div id="menu">
       <button class="iconbtn" id="logbtn" title="ことばの記録">記録</button>
+      <button class="iconbtn" id="voicetop" type="button" title="綾香の声 ON/OFF（クラウド音声）" aria-pressed="false">🔇 声</button>
       <button class="iconbtn" id="setbtn" title="設定">⚙</button>
     </div>
   </div>
@@ -383,9 +384,20 @@ if(SR){
   micBtn.classList.add('ready');
   micBtn.onclick=()=>{try{startSpeechInput()}catch(_){micRecognition=null;paintMic(false);briefMicHint('マイクが使えませんでした。文字入力でもどうぞ')}};
 }
-const voicesw=$('voicesw');
-function paintVoiceSw(){voicesw.textContent=voiceOn?'ON':'OFF';voicesw.classList.toggle('on',voiceOn)}
-voicesw.onclick=()=>{voiceOn=!voiceOn;store.set('voice',voiceOn);if(!voiceOn)stopVoicePlayback();paintVoiceSw()};paintVoiceSw();
+const voicesw=$('voicesw'), voicetop=$('voicetop');
+function paintVoiceSw(){
+  voicesw.textContent=voiceOn?'ON':'OFF';voicesw.classList.toggle('on',voiceOn);
+  if(voicetop){
+    voicetop.textContent=voiceOn?'🔊 声':'🔇 声';
+    voicetop.classList.toggle('on',voiceOn);
+    voicetop.setAttribute('aria-pressed',voiceOn?'true':'false');
+    voicetop.title=voiceOn?'綾香の声: ON（クラウド音声）':'綾香の声: OFF（タップでONにできます・クラウド音声）';
+  }
+}
+function setVoice(on){voiceOn=on;store.set('voice',voiceOn);if(!voiceOn)stopVoicePlayback();paintVoiceSw()}
+voicesw.onclick=()=>setVoice(!voiceOn);
+if(voicetop)voicetop.onclick=()=>setVoice(!voiceOn);
+paintVoiceSw();
 const speedsw=$('speedsw');
 function paintSpeedSw(){speedsw.textContent=fastText?'はやい':'ふつう';speedsw.classList.toggle('on',fastText)}
 speedsw.onclick=()=>{fastText=!fastText;store.set('fast',fastText);paintSpeedSw()};paintSpeedSw();
