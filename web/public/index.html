@@ -698,7 +698,8 @@ function chunks(text,maxlen=24){
 let advanceResolver=null;
 function waitOrTap(ms){return new Promise(res=>{let done=false;const finish=()=>{if(done)return;done=true;advanceResolver=null;clearTimeout(t);res()};const t=setTimeout(finish,ms);advanceResolver=finish})}
 function showTapCue(on){const c=$('tapcue');if(c)c.hidden=!on}
-$('stage').addEventListener('click',()=>{if(!voiceOn&&advanceResolver)advanceResolver()});
+// iOS Safariは素のdivへのclickが発火しないことがあるため、タッチでも確実に拾えるpointerupで受ける。
+$('stage').addEventListener('pointerup',()=>{if(!voiceOn&&advanceResolver)advanceResolver()},{passive:true});
 async function present(d){
   if(d.stage!=null){setBeat(d.stage);setDots(d.stage)}
   if(d.mood)setMood(d.mood);
