@@ -3,11 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0a10">
+<meta name="description" content="ブラウザでワンクリック、無料。扉のむこうの少女と、あなたのことばで話す体験。">
 <title>扉のむこうの少女</title>
 <!-- v1はTurnstile無効(日次上限+トークン+ターン上限で保護)。本物導入時にこの行を復活:
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script> -->
 <style>
   :root{
+    color-scheme:dark;
     --ink:#e9e4d8; --dim:#7d7668; --faint:#46443e; --gold:#c9a86a;
     --warm:#e8c98a; --panel:#14131a; --line:#2c2a33; --danger:#b98b70;
   }
@@ -17,9 +21,10 @@
     background:radial-gradient(120% 90% at 50% 18%,#14131a,#0a0a10 55%,#050509);
     color:var(--ink);font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
     overflow:hidden;
+    -webkit-tap-highlight-color:transparent;touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%;
   }
 
-  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;transition:background 2.5s}
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;transition:background 2.5s;user-select:none;-webkit-user-select:none}
   #door{position:absolute;top:46%;left:50%;transform:translate(-50%,-50%);
     width:min(44vw,300px);height:min(64vh,500px);
     border:1px solid #2a2620;border-radius:6px 6px 0 0;
@@ -140,9 +145,6 @@
   #intro h1{font-size:clamp(24px,4.4vw,36px);letter-spacing:.3em;font-weight:400;color:#d8d2c4;text-indent:.3em}
   #intro .lead{color:#8d8678;letter-spacing:.12em;font-size:14px;line-height:2.4}
   #intro .lead em{color:var(--warm);font-style:normal}
-  #steps{display:flex;flex-direction:column;gap:10px;align-items:flex-start;margin:4px auto}
-  #steps div{color:#9a9384;font-size:13px;letter-spacing:.1em;line-height:1.9}
-  #steps b{color:var(--warm);font-weight:400;margin-right:10px}
   .meta{color:var(--faint);font-size:11.5px;letter-spacing:.14em;line-height:2.2}
   #enter{padding:16px 46px;letter-spacing:.26em;border:1px solid #3a3630;background:transparent;color:var(--ink);
     border-radius:30px;font-size:15px;transition:.3s;text-indent:.26em}
@@ -174,7 +176,6 @@
   .gbody em{color:var(--warm);font-style:normal}
   .gnext{padding:14px 42px;letter-spacing:.22em;border:1px solid #3a3630;background:transparent;color:var(--ink);border-radius:30px;font-size:15px;cursor:pointer;transition:.3s;text-indent:.22em}
   .gnext:hover{border-color:var(--gold);box-shadow:0 0 24px rgba(201,168,106,.15)}
-  .gsub{display:flex;gap:18px;align-items:center}
   .gskip,.gback{background:none;border:none;color:var(--faint);font-size:12px;letter-spacing:.08em;cursor:pointer;padding:4px}
   .gskip:hover,.gback:hover{color:var(--ink)}
   .gdots{display:flex;gap:7px;margin-top:2px}
@@ -716,8 +717,8 @@ async function present(d){
     }else{
       // 声なし=ゆっくり自動送り。ただしタップで即・次へ。
       showTapCue(!last);
-      await waitOrTap(fastText?320+len*70:560+len*125);
-      if(!last)await waitOrTap(fastText?320:560);
+      await waitOrTap(fastText?260+len*60:460+len*120);
+      if(!last)await waitOrTap(fastText?240:440);
       showTapCue(false);
     }
   }
