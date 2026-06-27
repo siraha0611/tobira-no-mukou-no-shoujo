@@ -60,8 +60,10 @@
 
   #topbar{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;justify-content:space-between;
     padding:12px 16px;gap:10px}
-  #brand{font-size:12px;letter-spacing:.18em;color:var(--faint);white-space:nowrap}
-  #brand b{display:block;color:#8d8678;font-weight:400;font-size:13px;letter-spacing:.3em}
+  #brand{display:flex;align-items:center;gap:9px;font-size:12px;letter-spacing:.18em;color:var(--faint);white-space:nowrap}
+  #brandmark{width:24px;height:24px;flex:none;filter:drop-shadow(0 0 3px rgba(201,168,106,.35))}
+  #brand .brandtext{display:flex;flex-direction:column;line-height:1.18}
+  #brand b{color:#8d8678;font-weight:400;font-size:13px;letter-spacing:.3em}
   #memory{display:flex;flex-direction:column;align-items:center;gap:5px}
   #memory .label{font-size:10px;letter-spacing:.4em;color:var(--faint)}
   #dots{display:flex;gap:10px}
@@ -100,6 +102,10 @@
   #silent{font-size:12px;color:var(--dim);background:none;border:none;letter-spacing:.1em;padding:4px}
   #silent:hover{color:var(--ink)}
   #hint{color:var(--dim);font-size:12px;letter-spacing:.08em;min-height:16px;text-align:center}
+  #tapcue{position:fixed;left:0;right:0;bottom:15%;z-index:4;text-align:center;pointer-events:none;
+    color:var(--faint);font-size:12px;letter-spacing:.16em;animation:tappulse 1.9s ease-in-out infinite}
+  #tapcue[hidden]{display:none}
+  @keyframes tappulse{0%,100%{opacity:.3}50%{opacity:.8}}
 
   #letterview{display:none;max-width:min(88vw,460px);text-align:left;background:rgba(244,236,216,.04);
     border:1px solid #3d3829;border-radius:4px;padding:30px 34px;position:relative}
@@ -148,6 +154,13 @@
   #research[hidden]{display:none}
   #researchbadge{color:var(--warm);border:1px solid #3a3630;border-radius:18px;padding:3px 10px;letter-spacing:.12em}
   #research .privacy{color:var(--dim);max-width:min(88vw,520px)}
+  #voiceopt{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:11px;
+    border:1px solid #2a2820;border-radius:14px;padding:13px 20px;cursor:pointer;
+    color:#b9b1a0;font-size:13.5px;letter-spacing:.06em;transition:.25s;max-width:min(88vw,460px)}
+  #voiceopt:hover{border-color:var(--gold)}
+  #voiceopt:has(input:checked){border-color:var(--warm);background:rgba(201,168,106,.10);color:var(--ink)}
+  #voicecheck{width:17px;height:17px;accent-color:var(--gold);flex:none;cursor:pointer}
+  #voiceopt .vnote{flex-basis:100%;color:var(--faint);font-size:11px;letter-spacing:.04em;text-align:center}
   /* RP導入(初心者の入り口) */
   #intro{justify-content:center}
   #intro>:first-child{margin-top:0}
@@ -174,15 +187,38 @@
   #fin .name{font-size:clamp(25px,5vw,38px);letter-spacing:.35em;color:#e8dfc8;text-indent:.35em}
   #fin p{color:#8d8678;font-size:13.5px;letter-spacing:.14em;line-height:2.6}
   #fin .btns{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
-  #finsurvey{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:4px;border-top:1px solid #2c2a33;padding-top:18px;width:min(88vw,460px)}
+  #finsurvey{display:flex;flex-direction:column;align-items:stretch;gap:13px;margin-top:4px;border-top:1px solid #2c2a33;padding-top:18px;width:min(92vw,520px);text-align:left}
   #finsurvey[hidden]{display:none}
-  #finsurvey .surveylead{color:#d6c59d;font-size:13px;letter-spacing:.06em;line-height:2;text-align:center}
-  #finsurvey #finpid{color:var(--warm);font-weight:400}
-  .surveybtn{display:inline-block;text-decoration:none;border-color:var(--gold);color:var(--warm)}
-  .surveybtn:hover{background:rgba(201,168,106,.1);border-color:var(--gold)}
+  #surveygate{display:flex;flex-direction:column;align-items:center;gap:15px;padding:6px 0}
+  #surveygate[hidden],#surveybody[hidden]{display:none}
+  #finsurvey .surveylead{color:#d6c59d;font-size:13px;letter-spacing:.06em;line-height:1.9;text-align:center}
+  #finsurvey .surveynote{color:#8a8472;font-size:11px;line-height:1.7;text-align:center;margin-top:-7px}
+  .qblock{display:flex;flex-direction:column;gap:7px}
+  .qlabel{color:#e6dcc4;font-size:13px;line-height:1.6}
+  .qlabel .req{color:var(--gold);font-size:11px;margin-left:5px}
+  .qopts{display:flex;flex-wrap:wrap;gap:7px}
+  .qopt{display:inline-flex;align-items:center;gap:5px;border:1px solid #3a3742;border-radius:999px;padding:5px 12px;font-size:12.5px;color:#cfc6b4;cursor:pointer;transition:.15s}
+  .qopt:hover{border-color:var(--gold)}
+  .qopt input{accent-color:var(--gold);margin:0}
+  .qopt:has(input:checked){border-color:var(--gold);background:rgba(201,168,106,.12);color:var(--warm)}
+  .qgrid{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .qgrid .qg-label{flex:1 1 200px;color:#cfc6b4;font-size:12.5px;line-height:1.5}
+  .qscale{display:inline-flex;gap:4px}
+  .qscale label{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid #3a3742;border-radius:50%;font-size:11px;color:#9a927f;cursor:pointer;transition:.15s}
+  .qscale label:hover{border-color:var(--gold)}
+  .qscale input{position:absolute;opacity:0;width:0;height:0}
+  .qscale label:has(input:checked){border-color:var(--gold);background:rgba(201,168,106,.18);color:var(--warm)}
+  .qscale-legend{display:flex;justify-content:space-between;font-size:10.5px;color:#7c7565;margin-top:-2px}
+  #finsurvey textarea{width:100%;box-sizing:border-box;background:#16151b;border:1px solid #34313c;border-radius:10px;color:#e8e2d4;font-size:13px;line-height:1.6;padding:9px 11px;resize:vertical;min-height:62px;font-family:inherit}
+  #finsurvey textarea:focus{outline:none;border-color:var(--gold)}
+  .qhint{color:#7c7565;font-size:11px}
+  .surveysep{border:none;border-top:1px dashed #2c2a33;margin:4px 0}
+  #surveysubmit{align-self:center;margin-top:4px}
+  #surveymsg{text-align:center;font-size:12px;color:#d6c59d;min-height:1em}
+  #surveythanks{text-align:center;color:#d6c59d;font-size:13.5px;line-height:1.9;padding:8px 0}
 
   @media (max-width:640px){
-    #brand{display:none}
+    #brand .brandtext{display:none}
     #door{width:62vw;top:42%}
     #panel{top:56%}
     #chips .chip:nth-child(3){display:none}
@@ -197,7 +233,14 @@
   <div id="stage"><div id="door"><div id="figure"></div></div></div>
 
   <div id="topbar">
-    <div id="brand"><b>扉のむこうの少女</b><span id="engineline">Web文字版</span></div>
+    <div id="brand">
+      <svg id="brandmark" viewBox="0 0 48 48" fill="none" stroke="var(--gold)" stroke-width="1.8" aria-hidden="true">
+        <rect x="9" y="5" width="30" height="38" rx="2"/>
+        <line x1="27" y1="7" x2="27" y2="41" stroke-width="2.6"/>
+        <rect x="11" y="7" width="14" height="34" rx="1" stroke-width="1.4"/>
+      </svg>
+      <span class="brandtext"><b>扉のむこうの少女</b><span id="engineline">Web文字版</span></span>
+    </div>
     <div id="memory" title="彼女が思い出すと、灯がともります">
       <div id="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
       <div class="label">おもいで</div>
@@ -213,6 +256,8 @@
     <div id="kp" aria-live="polite"></div>
     <div id="thinking">（ことばを、たべている……）</div>
   </div>
+
+  <div id="tapcue" hidden>▸ 画面をタップで、つぎへ</div>
 
   <div id="controls" class="hidden">
     <div id="hint"></div>
@@ -267,6 +312,11 @@
         <span class="privacy">※体験中、本名や連絡先などの個人情報は入力しないでください</span>
       </div>
       <p class="meta">所要 15〜20分 ／ こわい演出はありません</p>
+      <label id="voiceopt">
+        <input type="checkbox" id="voicecheck">
+        <span class="vtxt">少女の声（音声）をONにして体験する</span>
+        <span class="vnote">あとから右上の「声」ボタンでも切り替えられます</span>
+      </label>
       <div id="turnstilebox" style="display:none">
         <div class="cf-turnstile"
              data-sitekey="1x00000000000000000000AA"
@@ -293,8 +343,122 @@
       <button id="replay" class="pill">もういちど、扉の前へ</button>
     </div>
     <div id="finsurvey" hidden>
-      <p class="surveylead">体験は、ここまでです。最後に、研究へのご協力をお願いします。<br>あなたのID <b id="finpid">P00</b> を入力して、事後アンケートにお答えください。</p>
-      <a id="surveylink" class="pill surveybtn" href="https://docs.google.com/forms/d/e/1FAIpQLSd4JKHWsU8S04A91wE_JtBKM_zM7fbn3_2abjHdRaAfcXPz6A/viewform" target="_blank" rel="noopener">▶ 事後アンケートに答える</a>
+      <div id="surveygate">
+        <p class="surveylead">体験アンケートにお答えいただけると嬉しいです。</p>
+        <button type="button" id="surveygatebtn" class="pill surveybtn">アンケートに答える</button>
+      </div>
+      <div id="surveybody" hidden>
+      <p class="surveylead">体験は、ここまでです。<br>よければ、すこしだけアンケートにご協力ください。</p>
+      <p class="surveynote">研究目的・匿名で扱います。本名や連絡先などの個人情報は入力しないでください。</p>
+
+      <form id="surveyform">
+        <hr class="surveysep">
+
+        <div class="qblock">
+          <div class="qlabel">性別</div>
+          <div class="qopts">
+            <label class="qopt"><input type="radio" name="gender" value="female">女性</label>
+            <label class="qopt"><input type="radio" name="gender" value="male">男性</label>
+            <label class="qopt"><input type="radio" name="gender" value="other">その他</label>
+            <label class="qopt"><input type="radio" name="gender" value="na">答えたくない</label>
+          </div>
+        </div>
+
+        <div class="qblock">
+          <div class="qlabel">年代</div>
+          <div class="qopts">
+            <label class="qopt"><input type="radio" name="age_band" value="10s">10代</label>
+            <label class="qopt"><input type="radio" name="age_band" value="20s">20代</label>
+            <label class="qopt"><input type="radio" name="age_band" value="30s">30代</label>
+            <label class="qopt"><input type="radio" name="age_band" value="40s">40代</label>
+            <label class="qopt"><input type="radio" name="age_band" value="50s_plus">50代以上</label>
+            <label class="qopt"><input type="radio" name="age_band" value="na">答えたくない</label>
+          </div>
+        </div>
+
+        <div class="qblock">
+          <div class="qlabel">ロールプレイ（RP）の経験はありますか？<span class="qhint">　演劇・ごっこ遊び・RPチャットなども含めて</span></div>
+          <div class="qopts">
+            <label class="qopt"><input type="radio" name="rp_experience" value="none">ない</label>
+            <label class="qopt"><input type="radio" name="rp_experience" value="yes">ある</label>
+          </div>
+        </div>
+
+        <div class="qblock">
+          <div class="qlabel">TRPGを実際にプレイした経験はありますか？<span class="qhint">　PL/KP・オン/オフ問わず</span></div>
+          <div class="qopts">
+            <label class="qopt"><input type="radio" name="trpg_experience" value="none">ない</label>
+            <label class="qopt"><input type="radio" name="trpg_experience" value="yes">ある</label>
+          </div>
+        </div>
+
+        <div class="qblock">
+          <div class="qlabel">TRPGの配信・リプレイ動画を見る頻度<span class="qhint">　任意</span></div>
+          <div class="qopts">
+            <label class="qopt"><input type="radio" name="watch_freq" value="daily">ほぼ毎日</label>
+            <label class="qopt"><input type="radio" name="watch_freq" value="weekly">週に数回</label>
+            <label class="qopt"><input type="radio" name="watch_freq" value="monthly">月に数回</label>
+            <label class="qopt"><input type="radio" name="watch_freq" value="less">それ以下</label>
+          </div>
+        </div>
+
+        <hr class="surveysep">
+        <div class="qlabel">体験について、あてはまる数字をえらんでください。</div>
+        <div class="qscale-legend"><span>1 まったく</span><span>5 とても</span></div>
+
+        <div class="qgrid"><span class="qg-label">またこういう体験をやってみたい</span>
+          <span class="qscale">
+            <label><input type="radio" name="again" value="1">1</label><label><input type="radio" name="again" value="2">2</label><label><input type="radio" name="again" value="3">3</label><label><input type="radio" name="again" value="4">4</label><label><input type="radio" name="again" value="5">5</label>
+          </span></div>
+        <div class="qgrid"><span class="qg-label">友人に勧めたい</span>
+          <span class="qscale">
+            <label><input type="radio" name="recommend" value="1">1</label><label><input type="radio" name="recommend" value="2">2</label><label><input type="radio" name="recommend" value="3">3</label><label><input type="radio" name="recommend" value="4">4</label><label><input type="radio" name="recommend" value="5">5</label>
+          </span></div>
+        <div class="qgrid"><span class="qg-label">実際のTRPGの卓に参加してみたい</span>
+          <span class="qscale">
+            <label><input type="radio" name="join_table" value="1">1</label><label><input type="radio" name="join_table" value="2">2</label><label><input type="radio" name="join_table" value="3">3</label><label><input type="radio" name="join_table" value="4">4</label><label><input type="radio" name="join_table" value="5">5</label>
+          </span></div>
+        <div class="qgrid"><span class="qg-label">会話の進め方が分かった</span>
+          <span class="qscale">
+            <label><input type="radio" name="understand_flow" value="1">1</label><label><input type="radio" name="understand_flow" value="2">2</label><label><input type="radio" name="understand_flow" value="3">3</label><label><input type="radio" name="understand_flow" value="4">4</label><label><input type="radio" name="understand_flow" value="5">5</label>
+          </span></div>
+        <div class="qgrid"><span class="qg-label">次に何をすればいいか迷わなかった</span>
+          <span class="qscale">
+            <label><input type="radio" name="understand_next" value="1">1</label><label><input type="radio" name="understand_next" value="2">2</label><label><input type="radio" name="understand_next" value="3">3</label><label><input type="radio" name="understand_next" value="4">4</label><label><input type="radio" name="understand_next" value="5">5</label>
+          </span></div>
+
+        <hr class="surveysep">
+        <div class="qlabel">体験の内容についての確認<span class="qhint">　任意・正誤は出ません</span></div>
+
+        <div class="qblock">
+          <div class="qlabel">この体験であなたがすることに、最も近いのは？</div>
+          <div class="qopts" style="flex-direction:column;align-items:flex-start">
+            <label class="qopt"><input type="radio" name="quiz1" value="1">少女が出すクイズに正解する</label>
+            <label class="qopt"><input type="radio" name="quiz1" value="2">自由に話しかけて、少女が思い出す手がかりにする</label>
+            <label class="qopt"><input type="radio" name="quiz1" value="3">少女と戦って倒す</label>
+            <label class="qopt"><input type="radio" name="quiz1" value="4">決められたセリフを順番に読む</label>
+          </div>
+        </div>
+
+        <hr class="surveysep">
+        <div class="qblock">
+          <div class="qlabel">『扉のむこうの少女』を体験して、どんな気持ちになりましたか？<span class="req">必須</span></div>
+          <textarea id="sv_felt" maxlength="2000" placeholder="感じたままで大丈夫です"></textarea>
+        </div>
+        <div class="qblock">
+          <div class="qlabel">難しかった・不安だった点があれば<span class="qhint">　任意</span></div>
+          <textarea id="sv_hard" maxlength="2000"></textarea>
+        </div>
+        <div class="qblock">
+          <div class="qlabel">もう一度やるなら、何があると良いと思いますか？<span class="qhint">　任意</span></div>
+          <textarea id="sv_wish" maxlength="2000"></textarea>
+        </div>
+
+        <button type="submit" id="surveysubmit" class="pill surveybtn">アンケートを送る</button>
+        <p id="surveymsg"></p>
+      </form>
+      <div id="surveythanks" hidden>ご協力ありがとうございました。<br>あなたのことばは、これからの『扉』のために大切に使わせていただきます。</div>
+      </div>
     </div>
     <p class="meta">『扉のむこうの少女』</p>
   </div>
@@ -320,8 +484,6 @@ const store={get:(k,d)=>{try{const v=localStorage.getItem('door_web_'+k);return 
 if(researchMode){
   $('researchbadge').textContent='研究モード: '+researchParticipantId;
   $('research').hidden=false;
-  $('finpid').textContent=researchParticipantId;
-  $('finsurvey').hidden=false;
 }
 let volume=store.get('vol',0.9), voiceOn=store.get('voice',false), fastText=store.get('fast',false); /* 声は既定OFF=opt-in(Aivis課金対策・聴きたい人だけON) */
 $('vol').value=Math.round(volume*100);
@@ -405,10 +567,12 @@ function paintVoiceSw(){
     voicetop.setAttribute('aria-pressed',voiceOn?'true':'false');
     voicetop.title=voiceOn?'綾香の声: ON（クラウド音声）':'綾香の声: OFF（タップでONにできます・クラウド音声）';
   }
+  const vc=$('voicecheck');if(vc)vc.checked=voiceOn;
 }
 function setVoice(on){voiceOn=on;store.set('voice',voiceOn);if(!voiceOn)stopVoicePlayback();paintVoiceSw()}
 voicesw.onclick=()=>setVoice(!voiceOn);
 if(voicetop)voicetop.onclick=()=>setVoice(!voiceOn);
+{const vc=$('voicecheck');if(vc)vc.onchange=()=>setVoice(vc.checked);}
 paintVoiceSw();
 const speedsw=$('speedsw');
 function paintSpeedSw(){speedsw.textContent=fastText?'はやい':'ふつう';speedsw.classList.toggle('on',fastText)}
@@ -530,6 +694,11 @@ function chunks(text,maxlen=24){
   }
   if(buf)out.push(buf);return out.length?out:[text.slice(0,maxlen)];
 }
+// 声なしのとき、画面タップで待ちを打ち切って次の文へ進めるための仕掛け。
+let advanceResolver=null;
+function waitOrTap(ms){return new Promise(res=>{let done=false;const finish=()=>{if(done)return;done=true;advanceResolver=null;clearTimeout(t);res()};const t=setTimeout(finish,ms);advanceResolver=finish})}
+function showTapCue(on){const c=$('tapcue');if(c)c.hidden=!on}
+$('stage').addEventListener('click',()=>{if(!voiceOn&&advanceResolver)advanceResolver()});
 async function present(d){
   if(d.stage!=null){setBeat(d.stage);setDots(d.stage)}
   if(d.mood)setMood(d.mood);
@@ -537,9 +706,19 @@ async function present(d){
   const segs=chunks(d.narration||'');
   for(let i=0;i<segs.length;i++){
     await setKP(segs[i]);
-    const minDelay=fastText?180:260+segs[i].length*56;
-    await Promise.all([speak(segs[i]),sleep(minDelay)]);
-    if(i<segs.length-1)await sleep(fastText?120:360);
+    const len=segs[i].length;
+    const last=i>=segs.length-1;
+    if(voiceOn){
+      // 声あり=音声が尺を決める(これは下限)。
+      await Promise.all([speak(segs[i]),sleep(fastText?180:260+len*56)]);
+      if(!last)await sleep(fastText?120:360);
+    }else{
+      // 声なし=ゆっくり自動送り。ただしタップで即・次へ。
+      showTapCue(!last);
+      await waitOrTap(fastText?320+len*70:560+len*125);
+      if(!last)await waitOrTap(fastText?320:560);
+      showTapCue(false);
+    }
   }
   addLog('girl',d.narration);
 }
@@ -631,6 +810,7 @@ async function turn(text){
 async function ending(){
   await sleep(2400);
   $('fin').classList.add('show');$('fin').classList.remove('gone');
+  $('finsurvey').hidden=false;  // 体験が終わったので、誰にでも事後アンケートを表示
   requestAnimationFrame(()=>$('fin').style.opacity='1');
 }
 $('send').onclick=()=>{const v=sayEl.value.trim();sayEl.value='';if(v)turn(v)};
@@ -639,6 +819,7 @@ $('silent').onclick=()=>turn('');
 $('enter').onclick=start;
 $('replay').onclick=()=>{clearState();location.reload()};
 $('finlog').onclick=()=>{$('log').classList.add('open')};
+$('surveygatebtn').onclick=()=>{$('surveygate').hidden=true;$('surveybody').hidden=false};
 
 $('letterbtn').onclick=async()=>{
   const btn=$('letterbtn');
@@ -694,6 +875,36 @@ function tryResume(){
 }
 async function safeJson(r){try{return await r.json()}catch(_){return {}}}
 function escapeText(s){const d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML}
+
+// 事後アンケート送信(ID不要・誰でも → /survey → D1)
+$('surveyform').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const f=$('surveyform');
+  const rv=name=>{const el=f.querySelector('input[name="'+name+'"]:checked');return el?el.value:''};
+  const felt=$('sv_felt').value.trim();
+  const msg=$('surveymsg');
+  if(!felt){msg.textContent='「体験して感じたこと」だけ、ひとことお願いします。';$('sv_felt').focus();return}
+  const btn=$('surveysubmit');btn.disabled=true;btn.textContent='送っています……';msg.textContent='';
+  const payload={
+    gender:rv('gender'),age_band:rv('age_band'),rp_experience:rv('rp_experience'),
+    trpg_experience:rv('trpg_experience'),watch_freq:rv('watch_freq'),
+    again:rv('again'),recommend:rv('recommend'),join_table:rv('join_table'),
+    understand_flow:rv('understand_flow'),understand_next:rv('understand_next'),
+    quiz1:rv('quiz1'),
+    felt,hard:$('sv_hard').value.trim(),wish:$('sv_wish').value.trim(),
+    stage,turns
+  };
+  if(researchMode)payload.participantId=researchParticipantId;
+  try{
+    const r=await fetch('/survey',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const d=await safeJson(r);
+    if(!r.ok)throw new Error(d.message||'送信に失敗しました');
+    f.hidden=true;$('surveythanks').hidden=false;
+  }catch(err){
+    btn.disabled=false;btn.textContent='アンケートを送る';
+    msg.textContent=err.message||'送信に失敗しました。少し待ってもう一度お試しください。';
+  }
+});
 
 loadCaps().then(tryResume);
 </script>

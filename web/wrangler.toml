@@ -29,6 +29,10 @@ AIVIS_TTS_ENABLED = "true"
 AIVIS_MODEL_UUID = "22e8ed77-94fe-4ef2-871f-a86f94e9a579"  # コハク(オズチャット/CV ねゆたろ)
 AIVIS_STYLE_ID = "2"  # コハクのスタイル 0=ノーマル/1=あまあま/2=せつなめ/3=ねむたい
 AIVIS_DAILY_CHAR_CAP = "15000"
+# 事後アンケート回答の通知メール(Resend)。RESEND_API_KEY は secret(`wrangler secret put RESEND_API_KEY`)。
+# 未設定なら通知はスキップ(回答のD1保存はそのまま動く)。差出人は既定 onboarding@resend.dev
+# (独自ドメイン不要・Resend登録アドレス=この NOTIFY_EMAIL 宛にのみ送れる)。
+NOTIFY_EMAIL = "anb14625siraha@gmail.com"
 TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 # v1はTurnstileを無効で公開(日次上限+セッショントークン+ターン上限で保護)。
 # 本物のTurnstile設定後に "true" にし、public/index.htmlのdata-sitekeyを実キーへ。

@@ -12,6 +12,9 @@ export interface Env {
   AIVIS_DAILY_CHAR_CAP?: string;
   RESEARCH_DB?: D1Database;
   RESEARCH_TRANSCRIPT?: string;
+  RESEND_API_KEY?: string;   // 事後アンケート回答の通知メール用(secret)。未設定なら通知しない
+  NOTIFY_EMAIL?: string;     // 通知の宛先(KASO)
+  RESEND_FROM?: string;      // 差出人。既定 onboarding@resend.dev(独自ドメイン不要・Resend登録アドレス宛に送れる)
   DOOR_KV: KVNamespace;
   ASSETS: Fetcher;
 }
@@ -179,7 +182,7 @@ const FALLBACK_LETTER =
   "　　　　　　　　　　綾香";
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -208,6 +211,10 @@ export default {
 
     if (url.pathname === "/tts" && request.method === "POST") {
       return handleTts(request, env);
+    }
+
+    if (url.pathname === "/survey" && request.method === "POST") {
+      return handleSurvey(request, env, ctx);
     }
 
     return jsonResponse({ error: "not_found" }, 404, request);
@@ -721,6 +728,183 @@ async function logResearchTurn(
   }
 }
 
+async function handleSurvey(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const originError = enforceSameOrigin(request);
+  if (originError) return originError;
+
+  if (!env.RESEARCH_DB) {
+    return jsonResponse({ error: "survey_unavailable", message: "アンケートの保存先が未設定です。" }, 503, request);
+  }
+
+  // 軽量スパム対策: 同一IPの短時間の連投だけ抑える(IPレス共有環境=学校/イベントのNATを潰さないよう
+  // 「1日上限」ではなく「1分あたり」に留める)。KVが不調でも回答は通す(保存優先)。
+  const ip = request.headers.get("CF-Connecting-IP") || "";
+  if (ip && !(await surveyRateOk(env, ip))) {
+    return jsonResponse(
+      { error: "survey_rate_limited", message: "短い時間に送信が集中しました。少し待ってからお試しください。" },
+      429,
+      request,
+    );
+  }
+
+  const body = await readJsonBody(request);
+  if (body instanceof Response) return body;
+
+  const pickEnum = (value: unknown, allowed: string[]): string | null => {
+    const v = typeof value === "string" ? value.trim() : "";
+    return allowed.includes(v) ? v : null;
+  };
+  const pickScale = (value: unknown): number | null => {
+    if (typeof value !== "string" && typeof value !== "number") return null;
+    const s = String(value).trim();
+    return /^[1-5]$/.test(s) ? Number(s) : null;
+  };
+  const pickText = (value: unknown, max: number): string | null => {
+    const v = typeof value === "string" ? value.trim() : "";
+    return v ? v.slice(0, max) : null;
+  };
+
+  const gender = pickEnum(body.gender, ["female", "male", "other", "na"]);
+  const ageBand = pickEnum(body.age_band, ["10s", "20s", "30s", "40s", "50s_plus", "na"]);
+  const rpExperience = pickEnum(body.rp_experience, ["none", "yes"]);
+  const trpgExperience = pickEnum(body.trpg_experience, ["none", "yes"]);
+  const watchFreq = pickEnum(body.watch_freq, ["daily", "weekly", "monthly", "less"]);
+
+  const again = pickScale(body.again);
+  const recommend = pickScale(body.recommend);
+  const joinTable = pickScale(body.join_table);
+  const understandFlow = pickScale(body.understand_flow);
+  const understandNext = pickScale(body.understand_next);
+
+  const quiz1 = pickEnum(body.quiz1, ["1", "2", "3", "4"]);
+  const quiz2 = pickEnum(body.quiz2, ["1", "2", "3", "4"]);
+  const quiz3 = pickEnum(body.quiz3, ["1", "2", "3"]);
+
+  const felt = pickText(body.felt, 2000);
+  const hard = pickText(body.hard, 2000);
+  const wish = pickText(body.wish, 2000);
+
+  // 必須は「体験中の気持ち(felt)」のみ。属性は「答えたくない」尊重で任意許容。
+  if (!felt) {
+    return jsonResponse({ error: "felt_required", message: "「体験中の気持ち」のご記入をお願いします。" }, 400, request);
+  }
+
+  const participantId = normalizeParticipantId(body.participantId) || null;
+  const stageVal = Number.isFinite(Number(body.stage)) ? clampInt(Number(body.stage), 0, 5) : null;
+  const turnsVal = Number.isFinite(Number(body.turns)) ? clampInt(Number(body.turns), 0, 1000) : null;
+
+  try {
+    await env.RESEARCH_DB.prepare(
+      "INSERT INTO survey_responses (id, created_at, participant_id, gender, age_band, rp_experience, trpg_experience, watch_freq, again, recommend, join_table, understand_flow, understand_next, quiz1, quiz2, quiz3, felt, hard, wish, client_stage, client_turns) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        crypto.randomUUID(),
+        new Date().toISOString(),
+        participantId,
+        gender, ageBand, rpExperience, trpgExperience, watchFreq,
+        again, recommend, joinTable, understandFlow, understandNext,
+        quiz1, quiz2, quiz3,
+        felt, hard, wish,
+        stageVal, turnsVal,
+      )
+      .run();
+  } catch {
+    return jsonResponse(
+      { error: "survey_save_failed", message: "保存に失敗しました。少し待ってもう一度お試しください。" },
+      500,
+      request,
+    );
+  }
+
+  // 保存成功 → KASOへ通知メール(バックグラウンド送信。失敗・未設定でも回答保存と応答には影響しない)
+  ctx.waitUntil(
+    sendSurveyNotification(env, {
+      gender, ageBand, rpExperience, trpgExperience, watchFreq,
+      again, recommend, joinTable, understandFlow, understandNext,
+      quiz1, quiz2, quiz3, felt, hard, wish,
+      participantId, stage: stageVal, turns: turnsVal,
+    }),
+  );
+
+  return jsonResponse({ ok: true }, 200, request);
+}
+
+type SurveyRecord = {
+  gender: string | null; ageBand: string | null; rpExperience: string | null;
+  trpgExperience: string | null; watchFreq: string | null;
+  again: number | null; recommend: number | null; joinTable: number | null;
+  understandFlow: number | null; understandNext: number | null;
+  quiz1: string | null; quiz2: string | null; quiz3: string | null;
+  felt: string; hard: string | null; wish: string | null;
+  participantId: string | null; stage: number | null; turns: number | null;
+};
+
+async function sendSurveyNotification(env: Env, r: SurveyRecord): Promise<void> {
+  const apiKey = env.RESEND_API_KEY;
+  const to = env.NOTIFY_EMAIL;
+  if (!apiKey || !to) return; // 未設定なら通知しない(保存は成功済み)
+  if (!(await consumeNotifyQuota(env))) return; // 1日上限超過なら通知を省く(保存は維持)
+  const from = env.RESEND_FROM || "扉のむこうの少女 <onboarding@resend.dev>";
+
+  const LABELS: Record<string, Record<string, string>> = {
+    gender: { female: "女性", male: "男性", other: "その他", na: "答えたくない" },
+    age: { "10s": "10代", "20s": "20代", "30s": "30代", "40s": "40代", "50s_plus": "50代以上", na: "答えたくない" },
+    yn: { none: "ない", yes: "ある" },
+    freq: { daily: "ほぼ毎日", weekly: "週に数回", monthly: "月に数回", less: "それ以下" },
+  };
+  const lbl = (group: string, v: string | null): string => (v ? LABELS[group][v] || v : "(未回答)");
+  const num = (v: number | null): string => (v == null ? "(未回答)" : String(v));
+  const txt = (v: string | null): string => (v && v.trim() ? v : "(未回答)");
+
+  const lines = [
+    "『扉のむこうの少女』に、新しいアンケート回答が届きました。",
+    "",
+    `性別: ${lbl("gender", r.gender)}`,
+    `年代: ${lbl("age", r.ageBand)}`,
+    `RP経験: ${lbl("yn", r.rpExperience)}`,
+    `TRPG経験: ${lbl("yn", r.trpgExperience)}`,
+    `視聴頻度: ${lbl("freq", r.watchFreq)}`,
+    "",
+    `再参加意向 [またやりたい/勧めたい/卓に参加]: ${num(r.again)} / ${num(r.recommend)} / ${num(r.joinTable)}`,
+    `理解の自己評価 [進め方/次に迷わない]: ${num(r.understandFlow)} / ${num(r.understandNext)}`,
+    `理解チェック [Q1「あなたがすること」※正答は2]: ${r.quiz1 || "-"}`,
+    "",
+    "■ 体験して感じたこと",
+    txt(r.felt),
+    "",
+    "■ 難しかった・不安だった点",
+    txt(r.hard),
+    "",
+    "■ もう一度やるなら",
+    txt(r.wish),
+    "",
+    `（参考）到達stage: ${num(r.stage)} ／ ターン数: ${num(r.turns)}${r.participantId ? " ／ pid: " + r.participantId : ""}`,
+  ];
+
+  try {
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from,
+        to,
+        subject: "扉のむこうの少女 — 新しいアンケート回答",
+        text: lines.join("\n"),
+      }),
+    });
+    if (!resp.ok) {
+      // APIキー不正/From不正/レート制限など。保存・応答は壊さず、運用調査用にログだけ残す。
+      try {
+        console.warn(`survey notify failed: ${resp.status} ${await resp.text()}`);
+      } catch {
+        console.warn(`survey notify failed: ${resp.status}`);
+      }
+    }
+  } catch {
+    // 通知失敗は回答保存に影響させない
+  }
+}
+
 async function issueStateToken(
   env: Env,
   state: Omit<SessionTokenPayload, "v" | "iat" | "maxTurns" | "h"> & { history: HistoryMessage[] },
@@ -834,6 +1018,37 @@ async function verifyTurnstile(env: Env, token: string, remoteIp: string): Promi
     return data.success === true;
   } catch {
     return false;
+  }
+}
+
+// 同一IPの連投抑制(1分窓あたりの上限)。共有IP(NAT)でも複数人が答えられる緩さ。
+const SURVEY_PER_MIN_CAP = 6;
+async function surveyRateOk(env: Env, ip: string): Promise<boolean> {
+  const minuteBucket = Math.floor(Date.now() / 60000);
+  const key = `survey:${ip}:${minuteBucket}`;
+  try {
+    const currentRaw = await env.DOOR_KV.get(key);
+    const current = Number.parseInt(currentRaw || "0", 10) || 0;
+    if (current >= SURVEY_PER_MIN_CAP) return false;
+    await env.DOOR_KV.put(key, String(current + 1), { expirationTtl: 120 });
+    return true;
+  } catch {
+    return true; // KV不調時は保存優先で通す
+  }
+}
+
+// 通知メールの1日上限(Resendの無料枠/受信箱保護)。超過分は保存だけ行い通知を省く。
+const SURVEY_NOTIFY_DAILY_CAP = 300;
+async function consumeNotifyQuota(env: Env): Promise<boolean> {
+  const key = `surveynotify:${jstDateKey()}`;
+  try {
+    const currentRaw = await env.DOOR_KV.get(key);
+    const current = Number.parseInt(currentRaw || "0", 10) || 0;
+    if (current >= SURVEY_NOTIFY_DAILY_CAP) return false;
+    await env.DOOR_KV.put(key, String(current + 1), { expirationTtl: secondsUntilNextJstDay() + 3600 });
+    return true;
+  } catch {
+    return true;
   }
 }
 
