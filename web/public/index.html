@@ -218,6 +218,20 @@
   #surveymsg{text-align:center;font-size:12px;color:#d6c59d;min-height:1em}
   #surveythanks{text-align:center;color:#d6c59d;font-size:13.5px;line-height:1.9;padding:8px 0}
 
+  /* ことばの燐光(canvas演出) */
+  #fx{position:fixed;inset:0;width:100%;height:100%;z-index:2;pointer-events:none}
+
+  /* 展示モード(?mode=exhibit): 実物の扉インスタレーション用キオスク表示 */
+  body.exhibit #menu,body.exhibit #controls,body.exhibit #tapcue{display:none!important}
+  body.exhibit.exhibit-ops #menu{display:flex!important}
+  body.exhibit.exhibit-ops #controls{display:flex!important}
+  body.exhibit #kp{font-size:clamp(20px,3.3vw,32px);max-width:16em;min-height:4.6em}
+  body.exhibit #door{width:min(40vw,340px)}
+  #kp.attractpulse{animation:attractp 3.6s ease-in-out infinite}
+  @keyframes attractp{0%,100%{opacity:.5}50%{opacity:1}}
+  #exhibitgate h1{font-size:clamp(22px,4vw,32px);letter-spacing:.3em;font-weight:400;color:#d8d2c4;text-indent:.3em}
+  #exhibitchecks{text-align:left;line-height:2.2;border:1px solid var(--line);border-radius:10px;padding:12px 18px;color:#9a9384;font-size:12.5px;letter-spacing:.05em}
+
   @media (max-width:640px){
     #brand .brandtext{display:none}
     #door{width:62vw;top:42%}
@@ -232,6 +246,7 @@
 <body data-beat="0" data-mood="calm">
 
   <div id="stage"><div id="door"><div id="figure"></div></div></div>
+  <canvas id="fx" aria-hidden="true"></canvas>
 
   <div id="topbar">
     <div id="brand">
@@ -280,6 +295,8 @@
     <div class="opt"><span>こえの大きさ</span><input id="vol" type="range" min="0" max="100" value="90"></div>
     <div class="opt"><span>こえ</span><button class="switch on" id="voicesw">ON</button></div>
     <div class="opt"><span>字幕の速さ</span><button class="switch" id="speedsw">ふつう</button></div>
+    <div class="opt" title="環境音(かすかな風と、遠い風鈴)"><span>音の風景</span><button class="switch" id="ambsw">OFF</button></div>
+    <div class="opt" id="hfopt" title="少女が話しおわると自動でマイクが開き、あなたが話しおわると自動で届きます"><span>おはなしモード</span><button class="switch" id="hfsw">OFF</button></div>
   </div>
 
   <div class="overlay" id="intro">
@@ -331,6 +348,17 @@
       <button class="gback" data-go="1">← RPの説明にもどる</button>
       <div id="caps">……</div>
     </div>
+  </div>
+
+  <!-- 展示モード(?mode=exhibit)の開始ゲート。設営者が一度だけ押す(音声の解禁+全画面) -->
+  <div class="overlay gone" id="exhibitgate">
+    <h1>展示モード</h1>
+    <p class="lead">『扉のむこうの少女』 インスタレーション</p>
+    <div id="exhibitchecks">確認中……</div>
+    <p class="meta">スピーカーの音量とマイクを確認して、はじめてください。<br>
+      はじめたあとは無人で動きつづけ、来場者が話しかけるたびに扉がこたえます。</p>
+    <button class="gnext" id="exhibitstart">展示をはじめる</button>
+    <p class="meta">とめるときは、このタブを閉じてください／左上のマークを5回タップで操作パネル</p>
   </div>
 
   <div class="overlay gone" id="fin">
@@ -477,6 +505,22 @@ let voices=[], chosenVoice=null;
 let aivisAudio=null, aivisAudioUrl='', finishAivisPlayback=null, voiceCancelSeq=0;
 let activeParticipantId=researchMode?researchParticipantId:'';
 
+// ── 展示モード(?mode=exhibit): 実物の扉に仕込むインスタレーション用キオスク ──
+// idle=無応答でお別れする秒数 / rest=結末後に次の来場者を待つまでの秒数
+// ttsbase=ローカル音声合成エンジン(AivisSpeech/VOICEVOX互換)のURL / speaker=そのstyle_id
+const EXHIBIT=(()=>{
+  const p=new URLSearchParams(location.search);
+  if(p.get('mode')!=='exhibit')return null;
+  return{
+    idle:Math.max(30,parseInt(p.get('idle')||'110',10)||110),
+    rest:Math.max(6,parseInt(p.get('rest')||'18',10)||18),
+    ttsbase:(p.get('ttsbase')||'http://127.0.0.1:10101').replace(/\/$/,''),
+    speaker:p.get('speaker')||''
+  };
+})();
+let exState='gate';
+let lastActivity=Date.now();
+
 window.onTurnstileOK=t=>{turnstileToken=t;$('enter').disabled=false;$('caps').textContent='……'};
 window.onTurnstileExpired=()=>{turnstileToken='';$('enter').disabled=true};
 
@@ -488,10 +532,12 @@ if(researchMode){
 }
 let volume=store.get('vol',0.9), voiceOn=store.get('voice',false), fastText=store.get('fast',false); /* 声は既定OFF=opt-in(Aivis課金対策・聴きたい人だけON) */
 $('vol').value=Math.round(volume*100);
-$('vol').oninput=e=>{volume=e.target.value/100;store.set('vol',volume)};
+$('vol').oninput=e=>{volume=e.target.value/100;store.set('vol',volume);try{ambient.sync()}catch(_){}};
 const micBtn=$('mic');
 let micRecognition=null, micListening=false, micBaseText='', micIdleHint='', micErrorHint='', micHintTimer=null, micAudioCtx=null, micStopping=false;
+let micAutoSend=false, micSilenceTimer=null, micAutoHandler=null; // おはなしモード(自動送信)用
 function micBlip(kind){
+  if(EXHIBIT)return; // 展示ではマイクが常時開閉するため操作音を出さない
   try{
     const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
     if(!micAudioCtx)micAudioCtx=new AC();
@@ -520,25 +566,42 @@ function briefMicHint(text){
 function finishMic(rec){
   if(micRecognition!==rec)return;
   micRecognition=null;paintMic(false);micBlip('stop');
+  clearTimeout(micSilenceTimer);
   if(micErrorHint)briefMicHint(micErrorHint);else hint.textContent=micIdleHint||'';
+  if(micAutoSend){ // おはなしモード: 聞き取れていたら、そのまま届ける
+    micAutoSend=false;
+    const v=sayEl.value.trim();sayEl.value='';
+    const h=micAutoHandler;
+    if(v&&h)setTimeout(()=>h(v),10);
+  }
 }
 function stopSpeechInput(){
   micStopping=true;
   if(!micRecognition){paintMic(false);return}
   try{micRecognition.stop()}catch(_){try{micRecognition.abort()}catch(_){}finishMic(micRecognition)}
 }
-function startSpeechInput(){
+function startSpeechInput(auto){
   if(!SR)return;
-  if(micRecognition||micListening){stopSpeechInput();return}
+  if(micRecognition||micListening){micAutoSend=false;clearTimeout(micSilenceTimer);stopSpeechInput();return}
   clearTimeout(micHintTimer);micBaseText=sayEl.value;micIdleHint=hint.textContent||'';micErrorHint='';micStopping=false;
+  micAutoSend=!!auto;
   try{
     const rec=new SR();micRecognition=rec;
     rec.lang='ja-JP';rec.interimResults=true;rec.continuous=true;rec.maxAlternatives=1;
-    rec.onstart=()=>{const first=!micListening;paintMic(true);hint.textContent='聞いています…どうぞ（終わったら「声」を押して停止）';if(first)micBlip('start')};
+    rec.onstart=()=>{const first=!micListening;paintMic(true);
+      hint.textContent=micAutoSend?'（きいています……話しおわると、そのまま届きます）':'聞いています…どうぞ（終わったら「声」を押して停止）';
+      if(first)micBlip('start')};
     rec.onresult=e=>{
       let heard='';
       for(let i=0;i<e.results.length;i++)heard+=(e.results[i][0]&&e.results[i][0].transcript)||'';
-      sayEl.value=micBaseText+heard;sayEl.focus();
+      sayEl.value=micBaseText+heard;if(!EXHIBIT)sayEl.focus();
+      lastActivity=Date.now();
+      if(micAutoSend){ // 話しおわりの「間」で自動確定
+        clearTimeout(micSilenceTimer);
+        if(sayEl.value.trim())micSilenceTimer=setTimeout(()=>{
+          micStopping=true;try{rec.stop()}catch(_){finishMic(rec)}
+        },EXHIBIT?1900:1700);
+      }
     };
     rec.onerror=e=>{
       const code=e&&e.error;
@@ -570,7 +633,7 @@ function paintVoiceSw(){
   }
   const vc=$('voicecheck');if(vc)vc.checked=voiceOn;
 }
-function setVoice(on){voiceOn=on;store.set('voice',voiceOn);if(!voiceOn)stopVoicePlayback();paintVoiceSw()}
+function setVoice(on){voiceOn=on;store.set('voice',voiceOn);if(!voiceOn)stopVoicePlayback();paintVoiceSw();try{ambient.sync();paintAmbSw()}catch(_){}}
 voicesw.onclick=()=>setVoice(!voiceOn);
 if(voicetop)voicetop.onclick=()=>setVoice(!voiceOn);
 {const vc=$('voicecheck');if(vc)vc.onchange=()=>setVoice(vc.checked);}
@@ -578,6 +641,158 @@ paintVoiceSw();
 const speedsw=$('speedsw');
 function paintSpeedSw(){speedsw.textContent=fastText?'はやい':'ふつう';speedsw.classList.toggle('on',fastText)}
 speedsw.onclick=()=>{fastText=!fastText;store.set('fast',fastText);paintSpeedSw()};paintSpeedSw();
+
+// ── 音の風景(WebAudio合成・素材レス): かすかな風のノイズ+遠い風鈴。おもいでが進むほど少し明るく ──
+const ambient=(()=>{
+  const AC=window.AudioContext||window.webkitAudioContext;
+  let ac=null,master=null,windFilter=null,chimeTimer=null,stageLv=0;
+  let pref=store.get('amb',null); // null=「声」の設定に追従
+  const isOn=()=>pref===null?voiceOn:!!pref;
+  function ensure(){
+    if(!AC||ac)return;
+    try{
+      ac=new AC();
+      master=ac.createGain();master.gain.value=0;master.connect(ac.destination);
+      // 風: ブラウンノイズ→ローパス(ゆらぎLFO)
+      const len=ac.sampleRate*4,buf=ac.createBuffer(1,len,ac.sampleRate),d=buf.getChannelData(0);
+      let v=0;for(let i=0;i<len;i++){v=(v+.02*(Math.random()*2-1))/1.02;d[i]=v*3.2}
+      const src=ac.createBufferSource();src.buffer=buf;src.loop=true;
+      windFilter=ac.createBiquadFilter();windFilter.type='lowpass';windFilter.frequency.value=220;windFilter.Q.value=.5;
+      const wg=ac.createGain();wg.gain.value=.28;
+      const lfo=ac.createOscillator(),lg=ac.createGain();lfo.frequency.value=.06;lg.gain.value=80;
+      lfo.connect(lg).connect(windFilter.frequency);lfo.start();
+      src.connect(windFilter).connect(wg).connect(master);src.start();
+      scheduleChime();
+    }catch(_){ac=null}
+  }
+  function bell(freq,at,dur,peak,pan){
+    if(!ac)return;
+    const t=at==null?ac.currentTime:at;
+    let out=master;
+    if(ac.createStereoPanner){const p=ac.createStereoPanner();p.pan.value=pan||0;p.connect(master);out=p}
+    [1,2.76,5.4].forEach((m,i)=>{ // 鐘の非整数倍音
+      const o=ac.createOscillator(),g=ac.createGain();
+      o.type='sine';o.frequency.value=freq*m*(1+(Math.random()-.5)*.004);
+      g.gain.setValueAtTime(.0001,t);
+      g.gain.linearRampToValueAtTime(peak/(i*2+1),t+.012);
+      g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+      o.connect(g).connect(out);o.start(t);o.stop(t+dur+.15);
+    });
+  }
+  function scheduleChime(){
+    clearTimeout(chimeTimer);
+    chimeTimer=setTimeout(()=>{
+      if(isOn()&&ac){
+        const f=[1318,1568,1760][Math.floor(Math.random()*3)];
+        bell(f,null,3+Math.random(),.03+stageLv*.005,(Math.random()*2-1)*.7);
+        if(Math.random()<.4)bell(f*1.19,ac.currentTime+.25+Math.random()*.3,2.6,.018,(Math.random()*2-1)*.7);
+      }
+      scheduleChime();
+    },(26-stageLv*3+Math.random()*22)*1000);
+  }
+  function sync(){ // 設定・音量が変わった時と、ユーザー操作の起点(音声解禁)で呼ぶ
+    if(!isOn()){if(master)master.gain.value=0;return}
+    ensure();if(!ac)return;
+    if(ac.state==='suspended')ac.resume().catch(()=>{});
+    master.gain.value=.75*volume;
+  }
+  function setStage(n){stageLv=n||0;if(windFilter)windFilter.frequency.value=220+stageLv*45}
+  function pulse(n){if(isOn()&&ac)bell(1046+(n||0)*84,null,2.8,.055,0)} // おもいでが灯る鈴
+  function openDoor(){if(!(isOn()&&ac))return;const t=ac.currentTime;[880,1174,1568,2093].forEach((f,i)=>bell(f,t+i*.42,4,.045,i%2?-.4:.4))}
+  return{sync,setStage,pulse,openDoor,isOn,setPref(v){pref=v;store.set('amb',v);sync()},pref:()=>pref};
+})();
+const ambsw=$('ambsw');
+function paintAmbSw(){ambsw.textContent=ambient.isOn()?'ON':'OFF';ambsw.classList.toggle('on',ambient.isOn())}
+ambsw.onclick=()=>{ambient.setPref(!ambient.isOn());paintAmbSw()};paintAmbSw();
+
+// ── おはなしモード(ハンズフリー): 少女が話しおわると自動で聞き、話しおわりの間で自動送信 ──
+let hfOn=!!store.get('hf',false)&&!!SR;
+const hfsw=$('hfsw');
+function paintHfSw(){hfsw.textContent=hfOn?'ON':'OFF';hfsw.classList.toggle('on',hfOn)}
+if(!SR)$('hfopt').style.display='none';
+hfsw.onclick=()=>{
+  hfOn=!hfOn;store.set('hf',hfOn);paintHfSw();
+  if(!hfOn){micAutoSend=false;stopSpeechInput()}
+  else if(!busy&&token&&!done)autoListen();
+};
+paintHfSw();
+function autoListen(){
+  // turn()の中(busy中)から呼ばれるため、少し遅らせてbusyが下りてから開く
+  setTimeout(()=>{
+    if(!hfOn||!SR||done||busy||micRecognition)return;
+    if(document.visibilityState!=='visible')return;
+    micAutoHandler=v=>turn(v);
+    try{startSpeechInput(true)}catch(_){}
+  },160);
+}
+
+// ── ことばの燐光(canvas): 送った言葉が扉に吸いこまれ、おもいでが増えるほど光の粒が漂う ──
+const fx=(()=>{
+  const cv=$('fx');
+  if(!cv||!cv.getContext)return{start(){},eat(){},pulse(){},open(){},setStage(){}};
+  const ctx=cv.getContext('2d');
+  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let W=0,H=0,motes=[],glyphs=[],rings=[],running=false,targetMotes=0,lastT=0,baseOn=false;
+  function resize(){const dpr=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+  addEventListener('resize',resize);resize();
+  function doorPt(){const r=document.getElementById('door').getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height*.52}}
+  function newMote(){return{x:Math.random()*W,y:H*.2+Math.random()*H*.75,r:.7+Math.random()*1.5,ph:Math.random()*7,sp:.05+Math.random()*.18,dx:(Math.random()-.5)*.1}}
+  function setStage(n){if(baseOn&&!reduced){targetMotes=5+(n||0)*5;wake()}}
+  function start(){baseOn=true;setStage(stage)}
+  function eat(text){
+    if(reduced)return;
+    const chars=[...String(text||'').replace(/\s/g,'')].slice(0,14);
+    for(let i=0;i<chars.length;i++){
+      glyphs.push({ch:chars[i],x:W/2+(Math.random()-.5)*Math.min(W*.55,340),y:H-(W>640?130:170)+(Math.random()-.5)*22,
+        t:-(i*.06+Math.random()*.08),dur:1.5+Math.random()*.5,cx:(Math.random()-.5)*150});
+    }
+    if(chars.length)wake();
+  }
+  function pulse(n){if(!reduced){rings.push({t:0,dur:1.6,max:120+(n||0)*24,w:1.4});wake()}}
+  function open(){if(!reduced){rings.push({t:0,dur:2.6,max:Math.max(W,H)*.55,w:2});rings.push({t:0,dur:2,max:200,w:1});wake()}}
+  function step(dt){
+    ctx.clearRect(0,0,W,H);
+    if(motes.length<targetMotes&&Math.random()<.35)motes.push(newMote());
+    else if(motes.length>targetMotes&&Math.random()<.05)motes.shift();
+    for(const m of motes){
+      m.ph+=dt*1.1;m.y-=m.sp*dt*34;m.x+=m.dx*dt*30+Math.sin(m.ph*.6)*.1;
+      if(m.y<-8){m.y=H+8;m.x=Math.random()*W}
+      ctx.beginPath();ctx.arc(m.x,m.y,m.r,0,7);
+      ctx.fillStyle='rgba(232,201,138,'+(.1+.2*(.5+.5*Math.sin(m.ph)))+')';ctx.fill();
+    }
+    const p=doorPt();
+    for(let i=glyphs.length-1;i>=0;i--){
+      const g=glyphs[i];g.t+=dt/g.dur;
+      if(g.t>=1){glyphs.splice(i,1);continue}
+      if(g.t<0)continue;
+      const e=g.t<.5?2*g.t*g.t:1-Math.pow(-2*g.t+2,2)/2;
+      const x=g.x+(p.x-g.x)*e+Math.sin(g.t*Math.PI)*g.cx*.3;
+      const y=g.y+(p.y-g.y)*e-Math.sin(g.t*Math.PI)*36;
+      const a=g.t<.12?g.t/.12:(g.t>.82?(1-g.t)/.18:1);
+      ctx.globalAlpha=Math.max(0,a*.85);
+      ctx.fillStyle='#e8c98a';
+      ctx.font=Math.round(15*(1-.4*g.t))+'px "Hiragino Mincho ProN","Yu Mincho",serif';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(g.ch,x,y);ctx.globalAlpha=1;
+    }
+    for(let i=rings.length-1;i>=0;i--){
+      const r=rings[i];r.t+=dt/r.dur;
+      if(r.t>=1){rings.splice(i,1);continue}
+      ctx.beginPath();ctx.arc(p.x,p.y,8+(r.max-8)*(1-Math.pow(1-r.t,3)),0,7);
+      ctx.strokeStyle='rgba(232,201,138,'+((1-r.t)*.38)+')';ctx.lineWidth=r.w;ctx.stroke();
+    }
+  }
+  function loop(ts){
+    if(!running)return;
+    const dt=Math.min(.05,(ts-lastT)/1000||.016);lastT=ts;
+    step(dt);
+    if(targetMotes||motes.length||glyphs.length||rings.length)requestAnimationFrame(loop);
+    else{running=false;ctx.clearRect(0,0,W,H)}
+  }
+  function wake(){if(!running){running=true;lastT=performance.now();requestAnimationFrame(loop)}}
+  return{start,eat,pulse,open,setStage};
+})();
+
 $('setbtn').onclick=()=>$('settings').classList.toggle('open');
 document.addEventListener('click',e=>{if(!$('settings').contains(e.target)&&e.target.id!=='setbtn')$('settings').classList.remove('open')});
 
@@ -606,29 +821,61 @@ function stopVoicePlayback(){
   stopAivisAudio();
   if('speechSynthesis'in window)speechSynthesis.cancel();
 }
+function playVoiceBlob(blob){
+  if(!aivisAudio)aivisAudio=new Audio();
+  stopAivisAudio();
+  aivisAudioUrl=URL.createObjectURL(blob);
+  aivisAudio.volume=volume;
+  aivisAudio.src=aivisAudioUrl;
+  return new Promise(res=>{
+    let donePlaying=false;
+    const finish=ok=>{
+      if(donePlaying)return;
+      donePlaying=true;finishAivisPlayback=null;cleanupAivisAudio();res(ok);
+    };
+    finishAivisPlayback=finish;
+    aivisAudio.onended=()=>finish(true);
+    aivisAudio.onerror=()=>finish(false);
+    const p=aivisAudio.play();
+    if(p&&typeof p.catch==='function')p.catch(()=>finish(false));
+  });
+}
 async function tryAivisSpeech(reading){
   try{
     const r=await fetch('/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:reading})});
     if(!r.ok)return false;
-    const blob=await r.blob();
-    if(!aivisAudio)aivisAudio=new Audio();
-    stopAivisAudio();
-    aivisAudioUrl=URL.createObjectURL(blob);
-    aivisAudio.volume=volume;
-    aivisAudio.src=aivisAudioUrl;
-    return await new Promise(res=>{
-      let donePlaying=false;
-      const finish=ok=>{
-        if(donePlaying)return;
-        donePlaying=true;finishAivisPlayback=null;cleanupAivisAudio();res(ok);
-      };
-      finishAivisPlayback=finish;
-      aivisAudio.onended=()=>finish(true);
-      aivisAudio.onerror=()=>finish(false);
-      const p=aivisAudio.play();
-      if(p&&typeof p.catch==='function')p.catch(()=>finish(false));
-    });
+    return await playVoiceBlob(await r.blob());
   }catch(_){return false}
+}
+// 展示モード: 手元のPCで動くローカル音声合成(AivisSpeech/VOICEVOX互換 REST)を最優先で使う。
+// クラウドTTSの従量課金なし・低遅延。見つからなければ自動でクラウド→ブラウザ声に落ちる。
+let localTtsOk=null, localTtsSpeaker=EXHIBIT&&EXHIBIT.speaker?Number(EXHIBIT.speaker):null;
+async function tryLocalTts(reading){
+  if(!EXHIBIT||localTtsOk===false)return false;
+  try{
+    const base=EXHIBIT.ttsbase;
+    if(localTtsSpeaker==null){
+      const r=await fetch(base+'/speakers',{signal:AbortSignal.timeout(2500)});
+      if(!r.ok)throw 0;
+      const sp=await r.json();
+      localTtsSpeaker=sp&&sp[0]&&sp[0].styles&&sp[0].styles[0]?sp[0].styles[0].id:null;
+      if(localTtsSpeaker==null)throw 0;
+    }
+    const q=await fetch(base+'/audio_query?text='+encodeURIComponent(reading)+'&speaker='+localTtsSpeaker,
+      {method:'POST',signal:AbortSignal.timeout(5000)});
+    if(!q.ok)throw 0;
+    const query=await q.json();
+    query.speedScale=.95;
+    query.volumeScale=Math.min(2,Math.max(.2,volume*1.2));
+    const w=await fetch(base+'/synthesis?speaker='+localTtsSpeaker,
+      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(query),signal:AbortSignal.timeout(20000)});
+    if(!w.ok)throw 0;
+    localTtsOk=true;
+    return await playVoiceBlob(await w.blob());
+  }catch(_){
+    if(localTtsOk!==true)localTtsOk=false; // 起動していない環境では以後試さない(毎ターンの待ちを作らない)
+    return false;
+  }
 }
 function speakBrowser(reading){
   return new Promise(res=>{
@@ -643,6 +890,8 @@ async function speak(text){
   if(!voiceOn||!text)return;
   const reading=readingText(text);
   const cancelSeq=voiceCancelSeq;
+  if(await tryLocalTts(reading))return;
+  if(!voiceOn||cancelSeq!==voiceCancelSeq)return;
   if(await tryAivisSpeech(reading))return;
   if(!voiceOn||cancelSeq!==voiceCancelSeq)return;
   await speakBrowser(reading);
@@ -680,7 +929,7 @@ function refreshChips(){
 
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function setKP(t){kp.classList.remove('show');return new Promise(r=>setTimeout(()=>{kp.textContent=t;kp.classList.add('show');r()},320))}
-function setBeat(n){stage=Math.max(0,Math.min(n||0,5));document.body.setAttribute('data-beat',String(stage))}
+function setBeat(n){stage=Math.max(0,Math.min(n||0,5));document.body.setAttribute('data-beat',String(stage));try{fx.setStage(stage);ambient.setStage(stage)}catch(_){}}
 function setMood(m){document.body.setAttribute('data-mood',m||'calm')}
 function setDots(n){document.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('lit',i<n))}
 function showThinking(b){thinking.classList.toggle('show',b)}
@@ -702,9 +951,16 @@ function showTapCue(on){const c=$('tapcue');if(c)c.hidden=!on}
 // iOS Safariは素のdivへのclickが発火しないことがあるため、タッチでも確実に拾えるpointerupで受ける。
 $('stage').addEventListener('pointerup',()=>{if(!voiceOn&&advanceResolver)advanceResolver()},{passive:true});
 async function present(d){
-  if(d.stage!=null){setBeat(d.stage);setDots(d.stage)}
+  if(d.stage!=null){
+    const prevBeat=Number(document.body.getAttribute('data-beat'))||0;
+    if(d.stage>prevBeat){fx.pulse(d.stage);ambient.pulse(d.stage)}
+    setBeat(d.stage);setDots(d.stage);
+  }
   if(d.mood)setMood(d.mood);
-  if(d.opened){opened=true;document.body.classList.add('open')}
+  if(d.opened){
+    if(!document.body.classList.contains('open')){fx.open();ambient.openDoor()}
+    opened=true;document.body.classList.add('open');
+  }
   const segs=chunks(d.narration||'');
   for(let i=0;i<segs.length;i++){
     await setKP(segs[i]);
@@ -746,7 +1002,7 @@ function restoreState(s){
 async function loadCaps(){
   try{
     const d=await (await fetch('/health')).json();
-    $('engineline').textContent=d.engine==='claude'?'Web文字版':'設定待ち';
+    $('engineline').textContent=d.engine==='claude'?(EXHIBIT?'展示モード':'Web文字版'):'設定待ち';
     $('caps').textContent=d.engine==='claude'?'扉の前に立てます。':'サーバ設定が未完了です。';
   }catch(_){
     $('caps').textContent='サーバに接続できません。wrangler dev の起動を確認してください。';
@@ -767,10 +1023,12 @@ async function start(){
     activeParticipantId=researchMode?researchParticipantId:'';
     clearState();saveState();
     $('intro').classList.add('gone');
+    fx.start();ambient.sync();
     await setKP('……');
     await present(d);
     showControls('彼女に、話しかけてください。なんの話でも、いいんです');
     refreshChips();saveState();
+    autoListen();
   }catch(e){
     $('caps').innerHTML='<span class="warn">'+escapeText(e.message||'扉の前に立てませんでした。もう一度どうぞ。')+'</span>';
     $('enter').disabled=false;
@@ -783,7 +1041,9 @@ function hideControls(){$('controls').classList.add('hidden')}
 
 async function turn(text){
   if(busy||!token||done)return;busy=true;
-  stopSpeechInput();
+  micAutoSend=false;stopSpeechInput();
+  lastActivity=Date.now();
+  if(text)fx.eat(text);
   hideControls();$('settings').classList.remove('open');stopVoicePlayback();
   const spoken=text?text:SILENCE_TEXT;
   if(text)addLog('you',text,false);else addLog('you','（……だまって、そこにいる）',false);
@@ -802,21 +1062,29 @@ async function turn(text){
     saveState();
     await present(d);
     if(done){await ending();saveState()}
-    else{showControls('');refreshChips()}
+    else{showControls('');refreshChips();autoListen()}
   }catch(_){
     showThinking(false);
     await setKP('……こえが、とおい。(通信に失敗しました。もう一度どうぞ)');
     showControls('');
+    if(EXHIBIT)autoListen(); // 展示は無人なので、聞き直して来場者の再挑戦を待つ
   }finally{busy=false}
 }
 async function ending(){
+  if(EXHIBIT){await exFinish();return} // 展示では手紙・アンケートを出さず、次の来場者を待つ
   await sleep(2400);
   $('fin').classList.add('show');$('fin').classList.remove('gone');
   $('finsurvey').hidden=false;  // 体験が終わったので、誰にでも事後アンケートを表示
   requestAnimationFrame(()=>$('fin').style.opacity='1');
 }
-$('send').onclick=()=>{const v=sayEl.value.trim();sayEl.value='';if(v)turn(v)};
-sayEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){const v=sayEl.value.trim();sayEl.value='';if(v)turn(v)}});
+function submitSay(){
+  const v=sayEl.value.trim();sayEl.value='';
+  if(!v)return;
+  if(EXHIBIT&&exState==='attract'){exBegin(v);return} // 展示の操作パネルから手動で始める場合
+  turn(v);
+}
+$('send').onclick=submitSay;
+sayEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing)submitSay()});
 $('silent').onclick=()=>turn('');
 $('enter').onclick=start;
 $('replay').onclick=()=>{clearState();location.reload()};
@@ -859,6 +1127,7 @@ function showGuideStep(n){
 document.querySelectorAll('#intro [data-go]').forEach(b=>b.addEventListener('click',()=>showGuideStep(b.dataset.go)));
 
 function tryResume(){
+  if(EXHIBIT)return; // 展示は毎回まっさらに始める
   const s=store.get('state',null);
   if(!s||!s.token||s.done)return;
   const savedParticipantId=stateParticipantId(s);
@@ -870,9 +1139,11 @@ function tryResume(){
   b.onclick=async()=>{
     restoreState(s);
     $('intro').classList.add('gone');
+    fx.start();ambient.sync();
     await setKP('……');
     showControls('おかえりなさい。つづきを、どうぞ');
     refreshChips();
+    autoListen();
   };
 }
 async function safeJson(r){try{return await r.json()}catch(_){return {}}}
@@ -908,7 +1179,103 @@ $('surveyform').addEventListener('submit',async e=>{
   }
 });
 
-loadCaps().then(tryResume);
+// ═══ 展示モード(?mode=exhibit): 実物の扉のインスタレーション ═══
+// 流れ: 設営者が「展示をはじめる」を押す(音声解禁+全画面) → 待ち受け(マイク常時)
+//       → 来場者が話しかけると自動でセッション開始 → 声で会話 → 結末 or 立ち去りで自動リセット
+function exAttract(){
+  if(!EXHIBIT)return;
+  exState='attract';
+  micAutoHandler=exBegin;
+  kp.classList.add('attractpulse');
+  setKP('とびらの前に立って、話しかけてみてください。——むこうで、だれかが待っています');
+  try{startSpeechInput(true)}catch(_){}
+}
+async function exBegin(text){
+  if(!EXHIBIT||exState!=='attract'||busy)return;
+  const core=String(text||'').replace(/[\s、。，,．.…‥!?！？~〜ー]/g,'');
+  if(core.length<2)return; // 物音などの誤検知は無視(見張り係が聞き直す)
+  exState='play';
+  kp.classList.remove('attractpulse');
+  lastActivity=Date.now();
+  micAutoHandler=v=>turn(v);
+  await start();
+  if(!token){
+    exState='cooldown';
+    await setKP('扉が、まだ、うまくひらきません。すこし待って、また話しかけてください');
+    setTimeout(exAttract,30000);
+    return;
+  }
+  await turn(text);
+}
+async function exFarewell(){ // 来場者が立ち去った(無応答)とき
+  if(!EXHIBIT||exState!=='play'||busy)return;
+  exState='bye';
+  micAutoSend=false;stopSpeechInput();stopVoicePlayback();
+  const bye='……また、あそびに、きてくださいね';
+  await setKP(bye);
+  await speak(bye);
+  await sleep(1600);
+  exReset();
+}
+async function exFinish(){ // 結末(扉がひらいた)あと、余韻をおいて次の来場者へ
+  exState='fin';
+  await sleep(1800);
+  await setKP('— 扉は、ひらきました —');
+  await sleep(EXHIBIT.rest*1000);
+  exReset();
+}
+function exReset(){
+  micAutoSend=false;stopVoicePlayback();stopSpeechInput();
+  token=null;history=[];turns=0;opened=false;done=false;busy=false;letterText=null;
+  logEntries=[];logBody.innerHTML='';clearState();
+  document.body.classList.remove('open');
+  setBeat(0);setDots(0);setMood('calm');
+  exAttract();
+}
+if(EXHIBIT){
+  document.body.classList.add('exhibit');
+  $('intro').classList.add('gone');
+  $('engineline').textContent='展示モード';
+  voiceOn=true;fastText=false;hfOn=!!SR;paintVoiceSw();paintHfSw();
+  if(ambient.pref()===null)ambient.setPref(true);
+  const gate=$('exhibitgate');gate.classList.remove('gone');
+  (async()=>{ // 設営者向けセルフチェック
+    const lines=[];
+    lines.push(SR?'✓ 音声認識: このブラウザで使えます':'✗ 音声認識: 非対応です(Chromeを使ってください)');
+    try{const h=await(await fetch('/health')).json();lines.push(h.engine==='claude'?'✓ サーバ: 応答あり':'✗ サーバ: 設定が未完了です')}
+    catch(_){lines.push('✗ サーバ: 接続できません(ネットワークを確認)')}
+    try{const r=await fetch(EXHIBIT.ttsbase+'/version',{signal:AbortSignal.timeout(2000)});
+      lines.push(r.ok?('✓ ローカル音声合成: '+EXHIBIT.ttsbase):'△ ローカル音声合成: 見つかりません(クラウド→ブラウザ声で代替)')}
+    catch(_){lines.push('△ ローカル音声合成: 見つかりません(クラウド→ブラウザ声で代替)')}
+    $('exhibitchecks').innerHTML=lines.map(escapeText).join('<br>');
+  })();
+  let exWakeLock=null;
+  const exGrabWake=async()=>{try{if(navigator.wakeLock)exWakeLock=await navigator.wakeLock.request('screen')}catch(_){}};
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')exGrabWake()});
+  $('exhibitstart').onclick=async()=>{
+    gate.classList.add('gone');
+    // 全画面要求が環境によっては固まる/失敗するため、1.5秒で見切って必ず展示を始める
+    try{await Promise.race([
+      Promise.resolve(document.documentElement.requestFullscreen()).catch(()=>{}),
+      new Promise(r=>setTimeout(r,1500)),
+    ])}catch(_){}
+    exGrabWake();ambient.sync();fx.start();
+    exAttract();
+  };
+  // 中の人用ハッチ: 左上のマークを5回タップで操作パネル(入力欄・メニュー)を出し入れ
+  let exTaps=0,exTapT=null;
+  $('brand').addEventListener('click',()=>{
+    exTaps++;clearTimeout(exTapT);exTapT=setTimeout(()=>exTaps=0,1700);
+    if(exTaps>=5){exTaps=0;document.body.classList.toggle('exhibit-ops')}
+  });
+  // 見張り係: 待ち受けのマイクが落ちていたら立て直し / 立ち去りを検知してお別れ
+  setInterval(()=>{
+    if(document.visibilityState!=='visible')return;
+    if(exState==='attract'&&!micRecognition&&!busy){try{startSpeechInput(true)}catch(_){}}
+    if(exState==='play'&&token&&!done&&!busy&&Date.now()-lastActivity>EXHIBIT.idle*1000)exFarewell();
+  },4000);
+}
+loadCaps().then(()=>{if(!EXHIBIT)tryResume()});
 </script>
 </body>
 </html>
