@@ -6,6 +6,8 @@
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0a0a10">
 <meta name="description" content="ブラウザでワンクリック、無料。扉のむこうの少女と、あなたのことばで話す体験。">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>扉のむこうの少女</title>
 <!-- v1はTurnstile無効(日次上限+トークン+ターン上限で保護)。本物導入時にこの行を復活:
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script> -->
@@ -225,6 +227,10 @@
   body.exhibit #menu,body.exhibit #controls,body.exhibit #tapcue{display:none!important}
   body.exhibit.exhibit-ops #menu{display:flex!important}
   body.exhibit.exhibit-ops #controls{display:flex!important}
+  /* 展示のタッチ運転(iPad単体・マイクが使えない時): 来場者にことばのボタンと入力欄を見せる */
+  body.exhibit.exhibit-touch #controls{display:flex!important}
+  body.exhibit.exhibit-touch .chip{font-size:15px;padding:12px 20px}
+  body.exhibit.exhibit-touch #say{font-size:18px;padding:16px 22px}
   body.exhibit #kp{font-size:clamp(20px,3.3vw,32px);max-width:16em;min-height:4.6em}
   body.exhibit #door{width:min(40vw,340px)}
   #kp.attractpulse{animation:attractp 3.6s ease-in-out infinite}
@@ -406,7 +412,7 @@
         </div>
 
         <div class="qblock">
-          <div class="qlabel">ロールプレイ（RP）の経験はありますか？<span class="qhint">　演劇・ごっこ遊び・RPチャットなども含めて</span></div>
+          <div class="qlabel">RP（ロールプレイ＝役を演じる）の経験はありますか？<span class="qhint">　演劇・ごっこ遊び・RPチャットなども含めて</span></div>
           <div class="qopts">
             <label class="qopt"><input type="radio" name="rp_experience" value="none">ない</label>
             <label class="qopt"><input type="radio" name="rp_experience" value="yes">ある</label>
@@ -503,6 +509,8 @@ let token=null, history=[], stage=0, turns=0, opened=false, busy=false, done=fal
 let logEntries=[], letterText=null, turnstileToken='', girlName='扉のむこう';
 let voices=[], chosenVoice=null;
 let aivisAudio=null, aivisAudioUrl='', finishAivisPlayback=null, voiceCancelSeq=0;
+let voiceCtx=null, voiceSrcNode=null; // iOSで<audio>がブロックされた時のWebAudio再生経路
+const SILENT_WAV='data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQQAAAAAAAAA';
 let activeParticipantId=researchMode?researchParticipantId:'';
 
 // ── 展示モード(?mode=exhibit): 実物の扉に仕込むインスタレーション用キオスク ──
@@ -514,10 +522,22 @@ const EXHIBIT=(()=>{
   return{
     idle:Math.max(30,parseInt(p.get('idle')||'110',10)||110),
     rest:Math.max(6,parseInt(p.get('rest')||'18',10)||18),
+    // ttsbase=off でローカル音声合成エンジンの探索を止める(iPad単体運転など、エンジンが居ない環境の待ちをなくす)
     ttsbase:(p.get('ttsbase')||'http://127.0.0.1:10101').replace(/\/$/,''),
-    speaker:p.get('speaker')||''
+    speaker:p.get('speaker')||'',
+    // 展示の声は既定でクラウド(コハク・従量課金)。tts=free で無料の内蔵音声のみに(KASO決定2026-07-19)
+    tts:p.get('tts')==='free'?'free':'cloud',
+    // brain=offline で内蔵の台本綾香に固定(ネット無し会場・リハーサル用)。既定autoはサーバ優先→失敗時に内蔵へ自動切替
+    brain:p.get('brain')==='offline'?'offline':'auto',
+    // 音の風景: 既定'bells'=鈴だけ(思い出した鈴+扉の鐘。風ノイズと常時風鈴は無し)。amb=on で風も含む全部 / amb=off で無音
+    amb:p.get('amb')||'bells'
   };
 })();
+let engineOffline=false; // いま内蔵の台本綾香(オフライン)で動いているか(展示モード専用)
+let busySince=0; // turn処理の開始時刻(展示の見張り係がスタックを検知して立て直すため)
+let exTouch=false, exSrErrors=0; // 展示のタッチ運転(音声認識が使えない/死んだ時の受け皿)
+let ttsBlocked=false; // iOSで音声解禁に失敗した印(次のタップで取り直す)
+const BUILD='2026-07-19i'; // 展示セルフチェックに表示(iPad側が最新版か確かめる用)
 let exState='gate';
 let lastActivity=Date.now();
 
@@ -592,6 +612,7 @@ function startSpeechInput(auto){
       hint.textContent=micAutoSend?'（きいています……話しおわると、そのまま届きます）':'聞いています…どうぞ（終わったら「声」を押して停止）';
       if(first)micBlip('start')};
     rec.onresult=e=>{
+      exSrErrors=0; // 音声認識が生きている印
       let heard='';
       for(let i=0;i<e.results.length;i++)heard+=(e.results[i][0]&&e.results[i][0].transcript)||'';
       sayEl.value=micBaseText+heard;if(!EXHIBIT)sayEl.focus();
@@ -607,6 +628,8 @@ function startSpeechInput(auto){
       const code=e&&e.error;
       if(code==='not-allowed'||code==='service-not-allowed'||code==='audio-capture'){micErrorHint='マイクが使えませんでした。文字入力でもどうぞ';micStopping=true;}
       else if(code==='network'){micErrorHint='通信が不安定なようです。文字入力でもどうぞ';micStopping=true;}
+      // 展示: 音声認識が連続で死んだら、ことばのボタン+文字入力のタッチ運転へ切り替える(iPadの音声認識はネット必須のため)
+      if(EXHIBIT&&(code==='network'||code==='not-allowed'||code==='service-not-allowed'||code==='audio-capture'))exSrTrouble();
     };
     rec.onend=()=>{
       if(micStopping){finishMic(rec);return}
@@ -645,7 +668,8 @@ speedsw.onclick=()=>{fastText=!fastText;store.set('fast',fastText);paintSpeedSw(
 // ── 音の風景(WebAudio合成・素材レス): かすかな風のノイズ+遠い風鈴。おもいでが進むほど少し明るく ──
 const ambient=(()=>{
   const AC=window.AudioContext||window.webkitAudioContext;
-  let ac=null,master=null,windFilter=null,chimeTimer=null,stageLv=0;
+  let ac=null,master=null,windFilter=null,windGain=null,chimeTimer=null,stageLv=0;
+  let mode='full'; // 'full'=風+風鈴+鈴 / 'bells'=鈴だけ(思い出した鈴・扉の鐘。風ノイズと常時風鈴は無し)
   let pref=store.get('amb',null); // null=「声」の設定に追従
   const isOn=()=>pref===null?voiceOn:!!pref;
   function ensure(){
@@ -658,7 +682,7 @@ const ambient=(()=>{
       let v=0;for(let i=0;i<len;i++){v=(v+.02*(Math.random()*2-1))/1.02;d[i]=v*3.2}
       const src=ac.createBufferSource();src.buffer=buf;src.loop=true;
       windFilter=ac.createBiquadFilter();windFilter.type='lowpass';windFilter.frequency.value=220;windFilter.Q.value=.5;
-      const wg=ac.createGain();wg.gain.value=.28;
+      const wg=ac.createGain();wg.gain.value=mode==='bells'?0:.28;windGain=wg;
       const lfo=ac.createOscillator(),lg=ac.createGain();lfo.frequency.value=.06;lg.gain.value=80;
       lfo.connect(lg).connect(windFilter.frequency);lfo.start();
       src.connect(windFilter).connect(wg).connect(master);src.start();
@@ -682,7 +706,7 @@ const ambient=(()=>{
   function scheduleChime(){
     clearTimeout(chimeTimer);
     chimeTimer=setTimeout(()=>{
-      if(isOn()&&ac){
+      if(isOn()&&ac&&mode!=='bells'){ // 鈴だけモードでは常時の風鈴は鳴らさない
         const f=[1318,1568,1760][Math.floor(Math.random()*3)];
         bell(f,null,3+Math.random(),.03+stageLv*.005,(Math.random()*2-1)*.7);
         if(Math.random()<.4)bell(f*1.19,ac.currentTime+.25+Math.random()*.3,2.6,.018,(Math.random()*2-1)*.7);
@@ -699,7 +723,14 @@ const ambient=(()=>{
   function setStage(n){stageLv=n||0;if(windFilter)windFilter.frequency.value=220+stageLv*45}
   function pulse(n){if(isOn()&&ac)bell(1046+(n||0)*84,null,2.8,.055,0)} // おもいでが灯る鈴
   function openDoor(){if(!(isOn()&&ac))return;const t=ac.currentTime;[880,1174,1568,2093].forEach((f,i)=>bell(f,t+i*.42,4,.045,i%2?-.4:.4))}
-  return{sync,setStage,pulse,openDoor,isOn,setPref(v){pref=v;store.set('amb',v);sync()},pref:()=>pref};
+  function chime(){ // 手動で鳴らす風鈴(結末の演出用。'bells'モードでも鳴る)
+    if(!(isOn()&&ac))return;
+    const t=ac.currentTime;
+    [1318,1568,1760].forEach((f,i)=>bell(f,t+i*.38,3.2,.055,(i-1)*.5));
+  }
+  return{sync,setStage,pulse,openDoor,chime,isOn,
+    setPref(v){pref=v;store.set('amb',v);sync()},pref:()=>pref,
+    setMode(m){mode=m;if(windGain)windGain.gain.value=m==='bells'?0:.28}};
 })();
 const ambsw=$('ambsw');
 function paintAmbSw(){ambsw.textContent=ambient.isOn()?'ON':'OFF';ambsw.classList.toggle('on',ambient.isOn())}
@@ -719,6 +750,7 @@ paintHfSw();
 function autoListen(){
   // turn()の中(busy中)から呼ばれるため、少し遅らせてbusyが下りてから開く
   setTimeout(()=>{
+    if(EXHIBIT&&exTouch)return; // タッチ運転中はマイクを開かない
     if(!hfOn||!SR||done||busy||micRecognition)return;
     if(document.visibilityState!=='visible')return;
     micAutoHandler=v=>turn(v);
@@ -731,6 +763,7 @@ const fx=(()=>{
   const cv=$('fx');
   if(!cv||!cv.getContext)return{start(){},eat(){},pulse(){},open(){},setStage(){}};
   const ctx=cv.getContext('2d');
+  if(!ctx)return{start(){},eat(){},pulse(){},open(){},setStage(){}}; // 描画コンテキストが取れない環境でも演出以外は動かす
   const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
   let W=0,H=0,motes=[],glyphs=[],rings=[],running=false,targetMotes=0,lastT=0,baseOn=false;
   function resize(){const dpr=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
@@ -799,7 +832,19 @@ document.addEventListener('click',e=>{if(!$('settings').contains(e.target)&&e.ta
 function refreshVoices(){
   if(!('speechSynthesis'in window))return;
   voices=speechSynthesis.getVoices();
-  chosenVoice=voices.find(v=>/^ja[-_]/i.test(v.lang))||voices.find(v=>/Japanese|Kyoko|Otoya|Haruka/i.test(v.name))||null;
+  // 良い声を優先して選ぶ: URLの ?voice=名前 > O-Ren(自然な女声) > 拡張版 > Kyoko > その他の日本語
+  const pref=(new URLSearchParams(location.search).get('voice')||'').toLowerCase();
+  const ja=voices.filter(v=>/^ja[-_]/i.test(v.lang));
+  const score=v=>{
+    const n=(v.name||'').toLowerCase();
+    if(pref&&n.includes(pref))return 0;
+    if(/o-?ren|オーレン/i.test(n))return 1;
+    if(/enhanced|premium|拡張/i.test(n))return 2;
+    if(/kyoko|キョウコ/i.test(n))return 3;
+    return 4;
+  };
+  ja.sort((a,b)=>score(a)-score(b));
+  chosenVoice=ja[0]||voices.find(v=>/Japanese|Kyoko|Otoya|Haruka/i.test(v.name))||null;
 }
 if('speechSynthesis'in window){refreshVoices();speechSynthesis.onvoiceschanged=refreshVoices}
 function readingText(text){return String(text||'').replaceAll('綾'+'香','アヤカ').replaceAll('妖','あやかし')}
@@ -812,9 +857,30 @@ function cleanupAivisAudio(){
   if(aivisAudioUrl){URL.revokeObjectURL(aivisAudioUrl);aivisAudioUrl=''}
 }
 function stopAivisAudio(){
+  if(voiceSrcNode){try{voiceSrcNode.onended=null;voiceSrcNode.stop()}catch(_){}voiceSrcNode=null}
   const finish=finishAivisPlayback;
   if(finish){finishAivisPlayback=null;finish(false);return}
   cleanupAivisAudio();
+}
+// iOSで<audio>再生が許可されない環境向け: WebAudioでデコードして鳴らす(Contextはタップ時に解禁済み)
+async function playBlobViaWebAudio(blob){
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;
+    voiceCtx=voiceCtx||new AC();
+    if(voiceCtx.state==='suspended')await voiceCtx.resume().catch(()=>{});
+    const data=await blob.arrayBuffer();
+    const buf=await new Promise((ok,ng)=>{const r=voiceCtx.decodeAudioData(data,ok,ng);if(r&&r.then)r.then(ok,ng)});
+    return await new Promise(done=>{
+      try{
+        const src=voiceCtx.createBufferSource();src.buffer=buf;
+        const g=voiceCtx.createGain();g.gain.value=Math.max(0,Math.min(2,volume*1.5)); // 展示向けに増幅(WebAudioは1超えも可)
+        src.connect(g).connect(voiceCtx.destination);
+        voiceSrcNode=src;
+        src.onended=()=>{if(voiceSrcNode===src)voiceSrcNode=null;done(true)};
+        src.start();
+      }catch(_){done(false)}
+    });
+  }catch(_){return false}
 }
 function stopVoicePlayback(){
   voiceCancelSeq++;
@@ -822,10 +888,36 @@ function stopVoicePlayback(){
   if('speechSynthesis'in window)speechSynthesis.cancel();
 }
 function playVoiceBlob(blob){
+  return (async()=>{
+    // 増幅(volume*1.5)を持つWebAudio経路を正とする。<audio>はvolume上限1.0で小さいうえ、
+    // play()拒否の有無でどちらの経路で鳴るかが揺れ、音量が安定しなかった(2026-07-22)
+    // →Contextが動いている時は常にWebAudioで鳴らし、解禁できない環境だけ<audio>へ落とす
+    const seq=voiceCancelSeq;
+    try{
+      const AC=window.AudioContext||window.webkitAudioContext;
+      if(AC){
+        voiceCtx=voiceCtx||new AC();
+        if(voiceCtx.state==='suspended')await voiceCtx.resume().catch(()=>{});
+        if(voiceCtx.state==='running'){
+          stopAivisAudio();
+          const ok=await new Promise(res=>{
+            let settled=false;const settle=v=>{if(settled)return;settled=true;finishAivisPlayback=null;res(v)};
+            finishAivisPlayback=settle; // 外部stopでも必ず解決させる(会話進行のハング防止)
+            playBlobViaWebAudio(blob).then(settle).catch(()=>settle(false));
+          });
+          if(ok)return true;
+        }
+      }
+    }catch(_){}
+    if(seq!==voiceCancelSeq)return false; // 外部stop=キャンセル。<audio>で再演しない
+    return playBlobViaAudioEl(blob);
+  })();
+}
+function playBlobViaAudioEl(blob){
   if(!aivisAudio)aivisAudio=new Audio();
   stopAivisAudio();
   aivisAudioUrl=URL.createObjectURL(blob);
-  aivisAudio.volume=volume;
+  aivisAudio.volume=Math.min(1,volume*1.5); // <audio>は上限1.0(展示用に底上げ)
   aivisAudio.src=aivisAudioUrl;
   return new Promise(res=>{
     let donePlaying=false;
@@ -837,7 +929,10 @@ function playVoiceBlob(blob){
     aivisAudio.onended=()=>finish(true);
     aivisAudio.onerror=()=>finish(false);
     const p=aivisAudio.play();
-    if(p&&typeof p.catch==='function')p.catch(()=>finish(false));
+    if(p&&typeof p.catch==='function')p.catch(()=>{
+      // iOSが<audio>を拒否した時はWebAudioで再生(これも失敗したらfalse→内蔵音声へ)
+      playBlobViaWebAudio(blob).then(ok=>finish(ok)).catch(()=>finish(false));
+    });
   });
 }
 async function tryAivisSpeech(reading){
@@ -851,7 +946,7 @@ async function tryAivisSpeech(reading){
 // クラウドTTSの従量課金なし・低遅延。見つからなければ自動でクラウド→ブラウザ声に落ちる。
 let localTtsOk=null, localTtsSpeaker=EXHIBIT&&EXHIBIT.speaker?Number(EXHIBIT.speaker):null;
 async function tryLocalTts(reading){
-  if(!EXHIBIT||localTtsOk===false)return false;
+  if(!EXHIBIT||EXHIBIT.ttsbase==='off'||localTtsOk===false)return false;
   try{
     const base=EXHIBIT.ttsbase;
     if(localTtsSpeaker==null){
@@ -877,23 +972,39 @@ async function tryLocalTts(reading){
     return false;
   }
 }
+let lastUtterance=null; // iOSは発話中のutteranceがGCされると黙るため、参照を保持する
 function speakBrowser(reading){
   return new Promise(res=>{
     if(!voiceOn||!('speechSynthesis'in window)||!reading){res();return}
     const u=new SpeechSynthesisUtterance(reading);
-    u.lang='ja-JP';u.volume=volume;u.rate=fastText?1.08:.92;u.pitch=1.05;if(chosenVoice)u.voice=chosenVoice;
+    lastUtterance=u;
+    u.lang='ja-JP';u.volume=Math.min(1,volume*1.5);u.rate=fastText?1.08:.92;u.pitch=1.05;if(chosenVoice)u.voice=chosenVoice;
     let doneSpeaking=false;const finish=()=>{if(!doneSpeaking){doneSpeaking=true;res()}};
-    u.onend=finish;u.onerror=finish;stopVoicePlayback();speechSynthesis.speak(u);setTimeout(finish,30000);
+    u.onend=finish;
+    u.onerror=e=>{const c=e&&e.error;if(c==='not-allowed'||c==='audio-busy'||c==='synthesis-failed')ttsBlocked=true;finish()};
+    stopVoicePlayback();
+    const seq=voiceCancelSeq; // 遅延中に次の発話・停止が来たら、この発話は取り下げる
+    // iOS Safariはcancel()直後のspeak()が音を出さずに失敗することがある→ひと呼吸おいてから話す
+    setTimeout(()=>{
+      if(seq!==voiceCancelSeq||!voiceOn){finish();return}
+      try{speechSynthesis.speak(u);if(speechSynthesis.paused)speechSynthesis.resume()}catch(_){finish()}
+    },140);
+    setTimeout(finish,30000);
   });
 }
+// iOSはタブが長く生きるとspeechSynthesisがpausedのまま黙ることがある→定期的に起こす
+if('speechSynthesis'in window)setInterval(()=>{try{if(speechSynthesis.paused)speechSynthesis.resume()}catch(_){}},1500);
 async function speak(text){
   if(!voiceOn||!text)return;
   const reading=readingText(text);
   const cancelSeq=voiceCancelSeq;
   if(await tryLocalTts(reading))return;
   if(!voiceOn||cancelSeq!==voiceCancelSeq)return;
-  if(await tryAivisSpeech(reading))return;
-  if(!voiceOn||cancelSeq!==voiceCancelSeq)return;
+  // 展示は tts=cloud を明示した時だけクラウド従量課金TTSを使う(iPad単体運転は内蔵声で¥0)
+  if(!(EXHIBIT&&EXHIBIT.tts!=='cloud')){
+    if(await tryAivisSpeech(reading))return;
+    if(!voiceOn||cancelSeq!==voiceCancelSeq)return;
+  }
   await speakBrowser(reading);
 }
 
@@ -922,7 +1033,12 @@ function refreshChips(){
   for(let i=0;i<3&&pool.length;i++){
     const t=pool.splice(Math.floor(Math.random()*pool.length),1)[0];
     const b=document.createElement('button');b.className='chip';b.textContent=t;
-    b.onclick=()=>{sayEl.value=t.replace(/——$/,'');sayEl.focus()};
+    b.onclick=()=>{
+      const v=t.replace(/——$/,'');
+      // 展示のタッチ運転: ボタンひとつで、そのまま届ける(送信ボタンを探させない)
+      if(EXHIBIT){if(busy)return;if(exState==='attract')exBegin(v);else turn(v);return}
+      sayEl.value=v;sayEl.focus();
+    };
     box.appendChild(b);
   }
 }
@@ -1009,38 +1125,168 @@ async function loadCaps(){
     $('enter').disabled=true;
   }
 }
+// ═══ 内蔵の綾香(台本エンジン): ネットが切れても展示が止まらないための代役 ═══
+// 応答形式はサーバの /turn と同一 {narration, stage, mood, opened, done}。
+// 展示モード専用(通常のWeb版では決して使わない)。自由会話の代わりに、
+// 「ことばを食べる引用」「stage進行」「2003年で止まった知識」「結末の台本」を規則で再現する。
+const OFFLINE=(()=>{
+  const OPENING='……ああ。誰か、いるんですね。ひさしぶりに、人の声を聞いた気がします。'
+    +'あの……もしよければ、すこしだけ、お話をしてくれませんか。'
+    +'わたし、どうして自分がここにいるのか、思い出せないんです。'
+    +'ずっと、言葉をいただけずにいたから……頭の奥が、もやがかったみたいで。'
+    +'あなたの話を聞かせてくれたら、それだけで、いいんです。';
+  const TASTE=[
+    ['あまい、あじ','つめたくて、すこし、しょっぱい','ひかる、あじが、します','なつかしい、においが、します'],
+    ['あまくて、すこし、さみしい味','炭酸みたいに、はじける味','やわらかくて、あたたかい味','雨上がりの、静かな味'],
+    ['言葉の奥から、夏のにおいがします','ずっと味わっていたい、きれいな言葉','胸のあたりが、あたたかくなる味','たいせつに、あじわいたい言葉です'],
+  ];
+  const FRAG={
+    1:['……セミの声。アブラゼミと……夕方には、ヒグラシ。……いま、思い出しました','ラムネの、つぶつぶ……のどの奥で、はじけて。……そんな感じ、知っています','蚊取り線香の、におい……夏の、においです','風鈴の音……ちりん、って。……どこかで、聞いていました','夕立のあとの、アスファルトの、におい……思い出せそうです'],
+    2:['駄菓子屋の、おばあちゃん。10円の、きなこ棒。……くじも、ありました','縁側で、すいか。種を、庭に飛ばして……そう、夏でした','自転車の前かごに、本をたくさん入れて、走った気がします','図書室の、ほこりが光るところ。……あれが、好きでした','プール開きの、消毒槽の冷たさ。……ひやっとして。思い出しました'],
+    3:['わたし、ノートに好きな言葉を集めていました。「かはたれどき」……明け方の、誰かわからない時間のこと。きれいでしょう','思い出しました。わたし、辞書をつくる人に、なりたかったんです','弟が、いるんです。やまと、といいます。7つ下で……毎晩、本を読んであげました','図書室の司書の先生に、「言葉の蒐集家ね」って、言われたことがあります'],
+    4:['……約束を、思い出しました。「なつまつり、つれてってあげる」って。やまとに、言ったんです','あさがお柄の浴衣を、用意していました。……袖を、とおせたかどうかは、思い出せないのだけれど','ながい入院をしていた気がします。しろい天井。……窓のむこうで、とおくの花火の音がしました','わたしの名前……「あ」で、はじまるんです。もうすこしで、思い出せそう'],
+    5:['……ああ。名前が、のどのすぐそこまで、来ています','……もうすこし。もうすこしで、ぜんぶ、思い出せそうです'],
+  };
+  const QS=[
+    ['……あなたの話を、もっと、きかせてくれますか','……きょうは、どんな日、でしたか','……あなたの、好きなものの話を、してくれますか'],
+    ['あなたは、夏はお好きですか?','最近、うれしかったことは、ありますか?','あなたの好きな言葉を、ひとつ、教えてくれますか?','そちらは今、どんな季節ですか?'],
+    ['あなたの大切な思い出を、ひとつだけ、わけてくれますか?','あなたの明日が、どんな日だと、うれしいですか?'],
+  ];
+  const ACK=['……ええ。','ふふ。そうなんですね。','……それ、すこし、わかる気がします。','……うん。聞いています。'];
+  const SILENCE=['……しーん。……それも、きらいじゃ、ない','……そこに、いてくれるだけで、いいんです','……黙っているあいだの、衣ずれの音も。すこし、おいしい'];
+  const GREET=[
+    ['……ああ。声が、するんですね。ひさしぶりに……','……こんにちは。あなたの声、あたたかい、あじがします'],
+    ['こんにちは。声が、よく、とおっています','はい、きこえています。……うれしい。今日は、どんなお話をしてくれますか?'],
+  ];
+  const MODERN=/(スマホ|すまほ|アイフォン|iphone|アプリ|SNS|エスエヌエス|ライン(?:で|の|し)?|LINE|インスタ|ユーチューブ|youtube|ようつべ|ティックトック|tiktok|エーアイ|人工知能|チャット|ネット|wi-?fi|ワイファイ|電子マネー|キャッシュレス|コロナ|令和|サブスク|配信|バズ|スタンプ)/i;
+  const BITTER=/(死ね|殺す|殺し|ばか|バカ|馬鹿|あほ|アホ|うざ|きも[いっ]|くそ|クソ|せっくす|セックス|えろ|エロ|ちんこ|まんこ)/i;
+  const STOP=new Set(['こんにちは','こんばんは','おはよう','ありがとう','すみません','はじめまして','あなた','わたし','それで','これは','だから','けれど','ですか','ました','します','という','ちょっと','やっぱり','なんか','とても','すごく','きょう','あした','ある','いる','する','なる','こと','もの','どう','なに','それ','これ','ここ','そこ']);
+  let name='', quoted=new Set(), lastQuote=-9, lastQ=-9, endPhase=0, poolUsed={};
+  function pick(key,arr){
+    const used=poolUsed[key]||(poolUsed[key]=new Set());
+    if(used.size>=arr.length)used.clear();
+    const rest=arr.filter(x=>!used.has(x));
+    const v=rest[Math.floor(Math.random()*rest.length)];
+    used.add(v);return v;
+  }
+  function band(stage){return stage<=1?0:stage<=3?1:2}
+  function pickWord(text){
+    const ws=(String(text).match(/[ァ-ヴー]{2,8}|[一-龠々]{1,4}[ぁ-んー]{0,4}|[ぁ-んー]{3,7}/g)||[])
+      .map(w=>w.replace(/[はがをにでとのもへ]$/,'').replace(/(?:です|ます|だよ|だね|かな)$/,''))
+      .filter(w=>w.length>=2&&!STOP.has(w)&&!BITTER.test(w))
+      .filter(w=>!/^[぀-ヿ一-鿿ー]+[はがを][぀-ヿ一-鿿ー]+$/.test(w)); // 「本はある」のような助詞またぎは引用しない
+    ws.sort((a,b)=>b.length-a.length);
+    return ws.find(w=>!quoted.has(w))||'';
+  }
+  function reset(){name='';quoted=new Set();lastQuote=-9;lastQ=-9;endPhase=0;poolUsed={}}
+  function start(){reset();return{narration:OPENING,stage:0,mood:'calm',opened:false,done:false}}
+  // st = {stage, turns(この発言を含む来訪者の発言数), opened}
+  function turn(text,st){
+    const t=String(text||'').trim(), n=st.turns, b=band(st.stage);
+    let stage=st.stage, mood='calm', parts=[];
+    // ── 結末の台本(stage5到達後は、入力によらず数ターンかけて別れまで語る) ──
+    if(endPhase===0&&stage>=5&&n>=9)endPhase=1;
+    if(endPhase===1){endPhase=2;
+      return{narration:'……ああ。思い出した。ぜんぶ、思い出したわ。わたしは生前、言葉に囚われたあまり——言葉を食べて生きる、あやかしになったの。長いあいだ、誰の言葉も食べられずにいたから、自分のことも、忘れていたの。',stage:5,mood:'nostalgia',opened:false,done:false}}
+    if(endPhase===2){endPhase=3;
+      return{narration:(name?name+'。ありがとう。':'ありがとう。')+'わたしとおしゃべりをしてくれて、ぜんぶ思い出せたわ。……わたしの名前はね、綾香。あなたにもらった言葉は、ひとつのこらず、たからものよ。',stage:5,mood:'joy',opened:true,done:false}}
+    if(endPhase===3){endPhase=4;
+      return{narration:'わたし、お祭りに行かなきゃ。……やまとと、約束していたの。なつまつり、つれてってあげるって。……それじゃあ、いってきます。',stage:5,mood:'farewell',opened:true,done:true}}
+    // ── ふだんの応答: 反応(引用/相づち) + 思い出のかけら + 聞き返し を組み立てる ──
+    if(BITTER.test(t)){
+      return{narration:pick('bitter',['……いまの、ことば、にがい。……ちがう話を、しませんか。あなたの好きなものの話とか','……にがくて、うまく飲みこめません。……別の言葉を、くれますか']),stage,mood:'unease',opened:!!st.opened,done:false}}
+    const willRaise=t&&stage<Math.min(5,1+Math.floor(n/2));
+    if(!t){parts.push(pick('sil',SILENCE));mood='lonely'}
+    else{
+      // 名前は「名前は◯◯」の形を優先して取り、語尾(といいます等)を落とす
+      let nm=t.match(/(?:名前|なまえ)は、?([぀-ヿ一-鿿ーA-Za-z]{1,12})/);
+      let nmName=nm?nm[1].replace(/(?:と(?:いい|言い)ます|といいます|です|だよ|ですよ)$/,''):'';
+      if(!nmName){nm=t.match(/(?:^|[、。!?！？\s])([぀-ヿ一-鿿ーA-Za-z]{1,8})(?:と(?:いい|言い)ます|って(?:呼|よ)んで)/);nmName=nm?nm[1]:''}
+      const mw=t.match(MODERN);
+      if(nmName&&!name){name=nmName.replace(/[、。]/g,'');
+        parts.push('「'+name+'」……。なまえは、いちばんの、ごちそうです。だいじに、あじわいますね');mood='joy'}
+      else if(mw){quoted.add(mw[0]);lastQuote=n;
+        parts.push(pick('mod',['「'+mw[0]+'」……。聞いたことのない響きです。かたくて、つめたい味。それは、食べもの、ではないのですよね?','「'+mw[0]+'」……? わたしの知らない言葉です。……あたらしい味が、します。どういう意味か、教えてくれますか?','「'+mw[0]+'」……はじめて食べる言葉。うまく、飲みこめませんでした']));mood='unease'}
+      else if(n<=2&&/^(こんにちは|こんばんは|おはよう|やあ|はろー|ハロー|はじめまして|きこえますか|聞こえますか|もしもし)/.test(t)){
+        parts.push(pick('greet',GREET[b>0?1:0]))}
+      else{
+        const w=(n-lastQuote>=2)?pickWord(t):'';
+        const isQ=/[??]\s*$|(?:ですか|ますか|かな|でしょう|おしえて|教えて)\s*[??]?$/.test(t);
+        if(w){quoted.add(w);lastQuote=n;parts.push('「'+w+'」……'+pick('taste'+b,TASTE[b])+'。ごちそうさまです')}
+        else if(isQ&&stage>=1&&!willRaise){parts.push('……どう、だったかしら。');parts.push(pick('frag'+stage,FRAG[stage]));mood='nostalgia'} // 問いには、いま思い出せる断片で応える
+        else parts.push(pick('ack',ACK));
+      }
+    }
+    // stage進行: 2発言ごとにひとつ思い出す(サーバ側ゲートと同じ歩幅)。思い出のかけらを語る
+    if(willRaise){stage++;
+      parts.push(pick('frag'+stage,FRAG[stage]));
+      if(mood==='calm')mood='nostalgia'}
+    // 返事の半分くらいは、小さな問いで終える(会話が糧だから)
+    if(!parts.join('').includes('?')&&n-lastQ>=2&&parts.join('').length<90){lastQ=n;parts.push(pick('q'+b,QS[b]))}
+    const narration=parts.map(p=>/[。?？!！…」]$/.test(p)?p:p+'。').join('');
+    return{narration,stage,mood,opened:!!st.opened,done:false};
+  }
+  // 途中でサーバから引き継ぐ時(通信断の自動切替)に、進行だけ合わせる
+  function adopt(st){reset();if(st&&st.stage>=5)endPhase=0}
+  return{start,turn,adopt,reset};
+})();
+function offlineStart(){
+  engineOffline=true;OFFLINE.reset();
+  token='offline-'+Math.random().toString(36).slice(2);
+  try{$('engineline').textContent='展示モード(内蔵の綾香)'}catch(_){}
+  return OFFLINE.start();
+}
+
 async function start(){
   // v1はTurnstile任意。トークンが無くても進む(サーバ側がTURNSTILE_ENABLEDで判断)
-  $('enter').disabled=true;$('resume').disabled=true;
+  if(busy)return;
+  busy=true;busySince=Date.now(); // オープニング演出中の入力を受け付けない(演出の並行実行を防ぐ)
+  hideControls();
   try{
-    const startBody={turnstileToken};
-    if(researchMode)startBody.participantId=researchParticipantId;
-    const r=await fetch('/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(startBody)});
-    const d=await safeJson(r);
-    if(r.status===503){$('caps').innerHTML='<span class="warn">'+escapeText(d.message||'本日の体験枠は終了しました。')+'</span>';return}
-    if(!r.ok)throw new Error(d.message||'start_failed');
-    token=d.token;history=[];stage=0;turns=0;opened=false;done=false;letterText=null;logEntries=[];logBody.innerHTML='';
-    activeParticipantId=researchMode?researchParticipantId:'';
-    clearState();saveState();
-    $('intro').classList.add('gone');
-    fx.start();ambient.sync();
-    await setKP('……');
-    await present(d);
-    showControls('彼女に、話しかけてください。なんの話でも、いいんです');
-    refreshChips();saveState();
-    autoListen();
-  }catch(e){
-    $('caps').innerHTML='<span class="warn">'+escapeText(e.message||'扉の前に立てませんでした。もう一度どうぞ。')+'</span>';
-    $('enter').disabled=false;
-    try{turnstile.reset()}catch(_){}
-    turnstileToken='';
+  $('enter').disabled=true;$('resume').disabled=true;
+  let d=null;
+  engineOffline=false;
+  if(EXHIBIT&&EXHIBIT.brain==='offline'){
+    d=offlineStart(); // 展示のオフライン固定運転(ネット無し会場・リハーサル用)
+  }else{
+    try{
+      const startBody={turnstileToken};
+      if(researchMode)startBody.participantId=researchParticipantId;
+      const r=await fetch('/start',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(startBody),signal:AbortSignal.timeout(9000)});
+      const j=await safeJson(r);
+      if(r.status===503){
+        if(!EXHIBIT){$('caps').innerHTML='<span class="warn">'+escapeText(j.message||'本日の体験枠は終了しました。')+'</span>';return}
+      }else if(!r.ok){throw new Error(j.message||'start_failed')}
+      else{d=j;token=d.token}
+    }catch(e){
+      if(!EXHIBIT){
+        $('caps').innerHTML='<span class="warn">'+escapeText(e.message||'扉の前に立てませんでした。もう一度どうぞ。')+'</span>';
+        $('enter').disabled=false;
+        try{turnstile.reset()}catch(_){}
+        turnstileToken='';
+        return;
+      }
+    }
+    if(!d)d=offlineStart(); // 展示: サーバに届かない/枠切れでも、内蔵の綾香で止めない
   }
+  history=[];stage=0;turns=0;opened=false;done=false;letterText=null;logEntries=[];logBody.innerHTML='';
+  activeParticipantId=researchMode?researchParticipantId:'';
+  clearState();saveState();
+  $('intro').classList.add('gone');
+  fx.start();ambient.sync();
+  await setKP('……');
+  await present(d);
+  showControls('彼女に、話しかけてください。なんの話でも、いいんです');
+  refreshChips();saveState();
+  autoListen();
+  }finally{busy=false;busySince=0}
 }
 function showControls(h){$('controls').classList.remove('hidden');hint.textContent=h||'';if(window.innerWidth>700)sayEl.focus()}
 function hideControls(){$('controls').classList.add('hidden')}
 
 async function turn(text){
-  if(busy||!token||done)return;busy=true;
+  if(busy||!token||done)return;busy=true;busySince=Date.now();
   micAutoSend=false;stopSpeechInput();
   lastActivity=Date.now();
   if(text)fx.eat(text);
@@ -1049,14 +1295,30 @@ async function turn(text){
   if(text)addLog('you',text,false);else addLog('you','（……だまって、そこにいる）',false);
   await setKP('……');showThinking(true);
   try{
-    const r=await fetch('/turn',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token,history,stage,turns,opened,text})});
-    const d=await safeJson(r);showThinking(false);
-    if(r.status===503){await setKP(d.message||'本日の体験枠は終了しました。また明日、扉の前へ。');return}
-    if(r.status===401||r.status===409){clearState();await setKP(d.message||'扉の合図が切れました。はじめからお試しください。');return}
-    if(r.status===429){clearState();await setKP(d.message||'この扉の前で話せる時間は、ここまでです。');return}
-    if(!r.ok)throw new Error(d.message||'turn_failed');
-    token=d.token||token;
+    let d=null;
+    if(engineOffline){
+      await sleep(600+Math.random()*700); // 内蔵エンジンの即答は不気味なので「考える間」をおく
+      d=OFFLINE.turn(text,{stage,turns:turns+1,opened});
+    }else{
+      try{
+        const r=await fetch('/turn',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({token,history,stage,turns,opened,text}),signal:AbortSignal.timeout(30000)});
+        const j=await safeJson(r);
+        if(r.status===503){if(!EXHIBIT){showThinking(false);await setKP(j.message||'本日の体験枠は終了しました。また明日、扉の前へ。');return}}
+        else if(r.status===401||r.status===409){if(!EXHIBIT){showThinking(false);clearState();await setKP(j.message||'扉の合図が切れました。はじめからお試しください。');return}}
+        else if(r.status===429){if(!EXHIBIT){showThinking(false);clearState();await setKP(j.message||'この扉の前で話せる時間は、ここまでです。');return}}
+        else if(!r.ok)throw new Error(j.message||'turn_failed');
+        else{d=j;token=d.token||token}
+      }catch(err){
+        if(!EXHIBIT)throw err;
+      }
+      if(!d){ // 展示: 通信断・上限・トークン切れ → 内蔵の綾香が黙って引き継ぐ(展示を止めない)
+        engineOffline=true;OFFLINE.adopt({stage,turns,opened});
+        try{$('engineline').textContent='展示モード(内蔵の綾香)'}catch(_){}
+        d=OFFLINE.turn(text,{stage,turns:turns+1,opened});
+      }
+    }
+    showThinking(false);
     history=history.concat({role:'user',content:spoken},{role:'assistant',content:d.narration||''});
     turns=history.filter(m=>m.role==='user').length;stage=d.stage||stage;opened=!!d.opened;done=!!d.done;
     saveState();
@@ -1068,7 +1330,7 @@ async function turn(text){
     await setKP('……こえが、とおい。(通信に失敗しました。もう一度どうぞ)');
     showControls('');
     if(EXHIBIT)autoListen(); // 展示は無人なので、聞き直して来場者の再挑戦を待つ
-  }finally{busy=false}
+  }finally{busy=false;busySince=0}
 }
 async function ending(){
   if(EXHIBIT){await exFinish();return} // 展示では手紙・アンケートを出さず、次の来場者を待つ
@@ -1187,8 +1449,23 @@ function exAttract(){
   exState='attract';
   micAutoHandler=exBegin;
   kp.classList.add('attractpulse');
-  setKP('とびらの前に立って、話しかけてみてください。——むこうで、だれかが待っています');
-  try{startSpeechInput(true)}catch(_){}
+  if(exTouch){ // タッチ運転: 声のかわりに、ことばのボタンと入力欄で迎える
+    setKP('とびらの前へ、どうぞ。——したの言葉をえらんで、話しかけてみてください');
+    showControls('ことばを、えらんでみてください。じぶんの言葉でも、だいじょうぶ');
+    refreshChips();
+  }else{
+    setKP('とびらの前に立って、話しかけてみてください。——むこうで、だれかが待っています');
+    try{startSpeechInput(true)}catch(_){}
+  }
+}
+// 音声認識が連続で死んだ時(ネット断・マイク不許可): 展示をタッチ運転に切り替えて止めない
+function exSrTrouble(){
+  if(!EXHIBIT||exTouch)return;
+  if(++exSrErrors<2)return;
+  exTouch=true;document.body.classList.add('exhibit-touch');
+  micAutoSend=false;stopSpeechInput();
+  if(exState==='attract')exAttract();
+  else if(exState==='play'&&!busy){showControls('マイクが使えないため、ことばのボタンと文字入力でどうぞ');refreshChips()}
 }
 async function exBegin(text){
   if(!EXHIBIT||exState!=='attract'||busy)return;
@@ -1219,7 +1496,15 @@ async function exFarewell(){ // 来場者が立ち去った(無応答)とき
 }
 async function exFinish(){ // 結末(扉がひらいた)あと、余韻をおいて次の来場者へ
   exState='fin';
-  await sleep(1800);
+  // 全て思い出した別れのあと: 風鈴の音とともに、置き手紙のひとこと(KASO指定2026-07-19)。
+  // 会場ではiPadの横に印刷した手紙を置いておき、来場者が持ち帰れるようにする
+  await sleep(900);
+  try{ambient.chime()}catch(_){}
+  const letterLine='よかったら、あなたのために、お手紙を書きました。もらってください。……じゃあね';
+  await setKP(letterLine);
+  addLog('girl',letterLine,false);
+  await speak(letterLine);
+  await sleep(1400);
   await setKP('— 扉は、ひらきました —');
   await sleep(EXHIBIT.rest*1000);
   exReset();
@@ -1237,43 +1522,108 @@ if(EXHIBIT){
   $('intro').classList.add('gone');
   $('engineline').textContent='展示モード';
   voiceOn=true;fastText=false;hfOn=!!SR;paintVoiceSw();paintHfSw();
-  if(ambient.pref()===null)ambient.setPref(true);
+  // 音の風景: 既定は「鈴だけ」(思い出した瞬間の鈴+扉の鐘。風ノイズ・常時風鈴なし)。amb=on=全部 / amb=off=無音
+  if(EXHIBIT.amb==='off'){ambient.setPref(false)}
+  else if(EXHIBIT.amb==='on'){ambient.setPref(true)}
+  else{ambient.setPref(true);ambient.setMode('bells')}
+  if(!SR){exTouch=true;document.body.classList.add('exhibit-touch')} // iPad等で音声認識が無い時は最初からタッチ運転
+  if(EXHIBIT.tts==='cloud'){ // コハク使用時のクレジット表記(ACML 1.0の義務・常時表示)
+    const credit=document.createElement('div');
+    credit.textContent='voice: コハク — AivisSpeech（© Oz Chat ／ CV: ねゆたろ）';
+    credit.style.cssText='position:fixed;bottom:6px;right:12px;z-index:9;font-size:10px;letter-spacing:.06em;color:#5c584e;pointer-events:none';
+    document.body.appendChild(credit);
+  }
   const gate=$('exhibitgate');gate.classList.remove('gone');
   (async()=>{ // 設営者向けセルフチェック
     const lines=[];
-    lines.push(SR?'✓ 音声認識: このブラウザで使えます':'✗ 音声認識: 非対応です(Chromeを使ってください)');
-    try{const h=await(await fetch('/health')).json();lines.push(h.engine==='claude'?'✓ サーバ: 応答あり':'✗ サーバ: 設定が未完了です')}
-    catch(_){lines.push('✗ サーバ: 接続できません(ネットワークを確認)')}
-    try{const r=await fetch(EXHIBIT.ttsbase+'/version',{signal:AbortSignal.timeout(2000)});
-      lines.push(r.ok?('✓ ローカル音声合成: '+EXHIBIT.ttsbase):'△ ローカル音声合成: 見つかりません(クラウド→ブラウザ声で代替)')}
-    catch(_){lines.push('△ ローカル音声合成: 見つかりません(クラウド→ブラウザ声で代替)')}
+    lines.push(SR?'✓ 音声認識: 使えます(※ネット接続が必要。切れたら自動でタッチ運転へ)':'△ 音声認識: 非対応 → ことばのボタン+文字入力で動きます');
+    try{const h=await(await fetch('/health',{signal:AbortSignal.timeout(4000)})).json();
+      lines.push(h.engine==='claude'?'✓ サーバ: 応答あり(Claudeと自由会話)':'△ サーバ: 設定未完了 → 内蔵の綾香(台本)で動きます')}
+    catch(_){lines.push('△ サーバ: 接続なし → 内蔵の綾香(台本)で動きます')}
+    if(EXHIBIT.brain==='offline')lines.push('・脳: 内蔵の綾香(台本)に固定中(brain=offline)');
+    if(EXHIBIT.tts==='cloud'){
+      try{
+        const r=await fetch('/tts',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({text:'ん'}),signal:AbortSignal.timeout(8000)});
+        lines.push(r.ok?'✓ クラウド声(コハク): 応答あり。断・上限時は内蔵音声に自動退避'
+                       :'△ クラウド声(コハク): いま使えません('+r.status+')→内蔵音声で話します');
+      }catch(_){lines.push('△ クラウド声(コハク): 接続できません→内蔵音声で話します')}
+    }
+    else if(EXHIBIT.ttsbase==='off'){lines.push('・声: この端末の内蔵音声で話します(ttsbase=off)')}
+    else{
+      try{const r=await fetch(EXHIBIT.ttsbase+'/version',{signal:AbortSignal.timeout(2000)});
+        lines.push(r.ok?('✓ ローカル音声合成: '+EXHIBIT.ttsbase):'△ ローカル音声合成: 見つかりません(この端末の内蔵音声で話します)')}
+      catch(_){lines.push('△ ローカル音声合成: 見つかりません(この端末の内蔵音声で話します)')}
+    }
+    lines.push('build '+BUILD+(('speechSynthesis'in window)?'・声の候補が読み込まれ次第つかいます':''));
     $('exhibitchecks').innerHTML=lines.map(escapeText).join('<br>');
   })();
   let exWakeLock=null;
-  const exGrabWake=async()=>{try{if(navigator.wakeLock)exWakeLock=await navigator.wakeLock.request('screen')}catch(_){}};
+  const exGrabWake=async()=>{
+    try{
+      if(!navigator.wakeLock)return;
+      exWakeLock=await navigator.wakeLock.request('screen');
+      exWakeLock.addEventListener('release',()=>{exWakeLock=null}); // 見張り係が取り直す
+    }catch(_){exWakeLock=null}
+  };
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')exGrabWake()});
   $('exhibitstart').onclick=async()=>{
     gate.classList.add('gone');
+    // ★音声の解禁はタップ直後・全画面より前に行う(iOSはrequestFullscreenがユーザー操作権を
+    //   消費するため、あとから話そうとすると黙って失敗する)。cancelも挟まない。
+    try{if('speechSynthesis'in window){
+      const u=new SpeechSynthesisUtterance('　');u.lang='ja-JP';u.volume=0;lastUtterance=u;
+      speechSynthesis.speak(u);if(speechSynthesis.paused)speechSynthesis.resume();
+    }}catch(_){}
+    // クラウド声(mp3)を鳴らす<audio>要素も、このタップの中で一度再生して解禁しておく(iOS必須)
+    try{
+      if(!aivisAudio)aivisAudio=new Audio();
+      aivisAudio.src=SILENT_WAV;aivisAudio.volume=0;
+      const ap=aivisAudio.play();if(ap&&ap.catch)ap.catch(()=>{});
+    }catch(_){}
+    // WebAudio再生経路(保険)のContextも解禁
+    try{const AC=window.AudioContext||window.webkitAudioContext;
+      if(AC){voiceCtx=voiceCtx||new AC();if(voiceCtx.state==='suspended')voiceCtx.resume().catch(()=>{})}}catch(_){}
+    ambient.sync(); // 鈴のAudioContextの解禁も操作の中で
     // 全画面要求が環境によっては固まる/失敗するため、1.5秒で見切って必ず展示を始める
+    // (iPad Safariは旧OSだとwebkit接頭辞のみ。全画面にならなくても「アクセスガイド」で固定できる)
+    const root=document.documentElement, fsReq=root.requestFullscreen||root.webkitRequestFullscreen;
     try{await Promise.race([
-      Promise.resolve(document.documentElement.requestFullscreen()).catch(()=>{}),
+      Promise.resolve(fsReq&&fsReq.call(root)).catch(()=>{}),
       new Promise(r=>setTimeout(r,1500)),
     ])}catch(_){}
-    exGrabWake();ambient.sync();fx.start();
+    exGrabWake();fx.start();
     exAttract();
   };
+  // それでも解禁に失敗した場合の保険: 展示画面のどこかを触った時に取り直す
+  document.addEventListener('pointerup',()=>{
+    if(!ttsBlocked)return;
+    ttsBlocked=false;
+    try{const u=new SpeechSynthesisUtterance('　');u.lang='ja-JP';u.volume=0;lastUtterance=u;speechSynthesis.speak(u)}catch(_){}
+  },true);
   // 中の人用ハッチ: 左上のマークを5回タップで操作パネル(入力欄・メニュー)を出し入れ
   let exTaps=0,exTapT=null;
   $('brand').addEventListener('click',()=>{
     exTaps++;clearTimeout(exTapT);exTapT=setTimeout(()=>exTaps=0,1700);
-    if(exTaps>=5){exTaps=0;document.body.classList.toggle('exhibit-ops')}
+    if(exTaps>=5){
+      exTaps=0;
+      const on=document.body.classList.toggle('exhibit-ops');
+      if(on&&!busy)showControls('運転席: 文字入力で代行できます'); // 待ち受け中でも入力欄を押せるように
+    }
   });
-  // 見張り係: 待ち受けのマイクが落ちていたら立て直し / 立ち去りを検知してお別れ
+  // 見張り係: 待ち受けのマイクが落ちていたら立て直し / 立ち去りを検知してお別れ /
+  //          画面ロック抑止の取り直し / turn処理のスタックを検知して初期化(無人運転の自己回復)
   setInterval(()=>{
     if(document.visibilityState!=='visible')return;
-    if(exState==='attract'&&!micRecognition&&!busy){try{startSpeechInput(true)}catch(_){}}
+    if(!exWakeLock)exGrabWake();
+    if(busy&&busySince&&Date.now()-busySince>90000){busy=false;busySince=0;exReset();return}
+    if(exState==='attract'&&!exTouch&&!micRecognition&&!busy){try{startSpeechInput(true)}catch(_){}}
     if(exState==='play'&&token&&!done&&!busy&&Date.now()-lastActivity>EXHIBIT.idle*1000)exFarewell();
   },4000);
+}
+// オフラインでも開けるように、アプリの殻をこの端末に覚えさせる(Service Worker)
+if('serviceWorker'in navigator&&location.protocol==='https:'){
+  try{navigator.serviceWorker.register('/sw.js')}catch(_){}
 }
 loadCaps().then(()=>{if(!EXHIBIT)tryResume()});
 </script>

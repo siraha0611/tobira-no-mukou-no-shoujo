@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>『扉のむこうの少女』体験アンケート</title>
+<style>
+  @page{size:A4;margin:0}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:210mm;height:297mm}
+  body{
+    font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans",sans-serif;
+    color:#222;background:#fff;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+    padding:12mm 14mm 10mm;
+    font-size:9.5pt;line-height:1.55;
+  }
+  h1{font-family:"Hiragino Mincho ProN",serif;font-size:15pt;letter-spacing:.12em;text-align:center;margin-bottom:1.5mm}
+  .note{font-size:7.5pt;color:#555;text-align:center;margin-bottom:4mm}
+  .sec{border:0.35mm solid #999;border-radius:2mm;padding:3mm 4mm;margin-bottom:3.2mm}
+  .sec h2{font-size:9.5pt;letter-spacing:.08em;margin-bottom:1.6mm;color:#111}
+  .sec h2 .opt{font-weight:normal;font-size:7.5pt;color:#666}
+  .row{display:flex;align-items:baseline;gap:3mm;margin-bottom:1.2mm;flex-wrap:wrap}
+  .row .q{min-width:44mm;font-size:9pt}
+  .choice{display:inline-block;margin-right:4.5mm;font-size:9pt;white-space:nowrap}
+  .choice::before{content:"";display:inline-block;width:3.4mm;height:3.4mm;border:0.3mm solid #444;border-radius:50%;vertical-align:-0.5mm;margin-right:1.4mm}
+  table.scale{width:100%;border-collapse:collapse;margin-top:1mm}
+  table.scale th,table.scale td{border:0.25mm solid #aaa;padding:1.4mm 1.6mm;font-size:8.8pt}
+  table.scale th{background:#f2f0ea;font-weight:normal;text-align:left}
+  table.scale td.c{width:9mm;text-align:center;color:#333}
+  .legend{font-size:7.5pt;color:#666;margin-top:0.8mm;text-align:right}
+  .quiz .choice{display:block;margin-bottom:1mm}
+  .free{margin-top:1mm}
+  .free .q{font-size:9pt;margin-bottom:1mm}
+  .free .req{color:#a06c1f;font-size:7.5pt;margin-left:1.5mm}
+  .box{border:0.3mm solid #888;border-radius:1.5mm;width:100%}
+  .box.big{height:22mm}
+  .box.mid{height:13mm}
+  .thanks{text-align:center;font-size:8.5pt;color:#444;margin-top:2.5mm;letter-spacing:.1em}
+  .foot{text-align:center;font-size:7pt;color:#888;margin-top:1mm}
+</style>
+</head>
+<body>
+  <h1>『扉のむこうの少女』体験アンケート</h1>
+  <div class="note">研究・作品改善の目的で、匿名のまま集計します。本名や連絡先などの個人情報は書かないでください。あてはまるものに ○ をつけてください。</div>
+
+  <div class="sec">
+    <h2>1. あなたについて <span class="opt">（答えたくない項目は空欄でかまいません）</span></h2>
+    <div class="row"><span class="q">性別</span>
+      <span class="choice">女性</span><span class="choice">男性</span><span class="choice">その他</span><span class="choice">答えたくない</span></div>
+    <div class="row"><span class="q">年代</span>
+      <span class="choice">10代</span><span class="choice">20代</span><span class="choice">30代</span><span class="choice">40代</span><span class="choice">50代</span><span class="choice">60代以上</span></div>
+    <div class="row"><span class="q">RP（ロールプレイ＝役を演じる）の経験</span>
+      <span class="choice">ない</span><span class="choice">ある</span></div>
+    <div class="row"><span class="q">TRPGを実際にプレイした経験</span>
+      <span class="choice">ない</span><span class="choice">ある</span></div>
+    <div class="row"><span class="q">TRPGの配信・リプレイ動画を見る頻度</span>
+      <span class="choice">ほぼ毎日</span><span class="choice">週に数回</span><span class="choice">月に数回</span><span class="choice">それ以下</span></div>
+  </div>
+
+  <div class="sec">
+    <h2>2. 体験について、あてはまる数字に ○ をつけてください</h2>
+    <table class="scale">
+      <tr><th>またこういう体験をやってみたい</th><td class="c">1</td><td class="c">2</td><td class="c">3</td><td class="c">4</td><td class="c">5</td></tr>
+      <tr><th>友人に勧めたい</th><td class="c">1</td><td class="c">2</td><td class="c">3</td><td class="c">4</td><td class="c">5</td></tr>
+      <tr><th>実際のTRPGの卓に参加してみたい</th><td class="c">1</td><td class="c">2</td><td class="c">3</td><td class="c">4</td><td class="c">5</td></tr>
+      <tr><th>会話の進め方が分かった</th><td class="c">1</td><td class="c">2</td><td class="c">3</td><td class="c">4</td><td class="c">5</td></tr>
+      <tr><th>次に何をすればいいか迷わなかった</th><td class="c">1</td><td class="c">2</td><td class="c">3</td><td class="c">4</td><td class="c">5</td></tr>
+    </table>
+    <div class="legend">1 = まったく　〜　5 = とても</div>
+  </div>
+
+  <div class="sec quiz">
+    <h2>3. この体験であなたがすることに、最も近いのは？ <span class="opt">（ひとつに○）</span></h2>
+    <span class="choice">少女が出すクイズに正解する</span>
+    <span class="choice">自由に話しかけて、少女が思い出す手がかりにする</span>
+    <span class="choice">少女と戦って倒す</span>
+    <span class="choice">決められたセリフを順番に読む</span>
+  </div>
+
+  <div class="sec">
+    <h2>4. じゆうに、おしえてください</h2>
+    <div class="free">
+      <div class="q">『扉のむこうの少女』を体験して、どんな気持ちになりましたか？<span class="req">※これだけは、ぜひ</span></div>
+      <div class="box big"></div>
+    </div>
+    <div class="free" style="margin-top:2.2mm">
+      <div class="q">難しかった・不安だった点があれば</div>
+      <div class="box mid"></div>
+    </div>
+    <div class="free" style="margin-top:2.2mm">
+      <div class="q">もう一度やるなら、何があると良いと思いますか？</div>
+      <div class="box mid"></div>
+    </div>
+  </div>
+
+  <div class="thanks">— ご協力、ありがとうございました。あなたの言葉が、次の扉をつくります —</div>
+  <div class="foot">『扉のむこうの少女』／ KASO（勝俣風太）　nコ展 2026.7.24-26</div>
+</body>
+</html>

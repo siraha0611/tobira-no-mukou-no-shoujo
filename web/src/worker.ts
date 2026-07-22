@@ -8,6 +8,7 @@ export interface Env {
   AIVIS_API_KEY?: string;
   AIVIS_MODEL_UUID?: string;
   AIVIS_STYLE_ID?: string;
+  AIVIS_VOLUME?: string;
   AIVIS_TTS_ENABLED?: string;
   AIVIS_DAILY_CHAR_CAP?: string;
   RESEARCH_DB?: D1Database;
@@ -195,6 +196,16 @@ export default {
 
     if ((url.pathname === "/" || url.pathname === "/index.html") && request.method === "GET") {
       return serveIndex(request, env);
+    }
+
+    // Service Worker(オフライン起動用の殻)。本番は明示ルーティングのためここで配信する
+    if (url.pathname === "/sw.js" && request.method === "GET") {
+      const assetResponse = await env.ASSETS.fetch(new Request(new URL("/sw.js", url.origin), request));
+      if (!assetResponse.ok) return jsonResponse({ error: "not_found" }, 404, request);
+      const headers = new Headers(assetResponse.headers);
+      headers.set("Content-Type", "text/javascript; charset=utf-8");
+      headers.set("Cache-Control", "no-store");
+      return new Response(assetResponse.body, { status: 200, headers });
     }
 
     if (url.pathname === "/start" && request.method === "POST") {
@@ -434,6 +445,8 @@ async function handleTts(request: Request, env: Env): Promise<Response> {
         output_format: "mp3",
         use_ssml: false,
         style_id: Number(env.AIVIS_STYLE_ID ?? 2) || 0,
+        // 展示会場向けの音量(0.0〜2.0・既定1.0は小さい)。AIVIS_VOLUMEで調整可
+        volume: Math.max(0, Math.min(2, Number(env.AIVIS_VOLUME || "1.6") || 1.6)),
       }),
     });
     if (!resp.ok) {

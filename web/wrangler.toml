@@ -28,7 +28,10 @@ DAILY_CALL_CAP = "50"
 AIVIS_TTS_ENABLED = "true"
 AIVIS_MODEL_UUID = "22e8ed77-94fe-4ef2-871f-a86f94e9a579"  # コハク(オズチャット/CV ねゆたろ)
 AIVIS_STYLE_ID = "2"  # コハクのスタイル 0=ノーマル/1=あまあま/2=せつなめ/3=ねむたい
-AIVIS_DAILY_CHAR_CAP = "15000"
+AIVIS_VOLUME = "2.0"  # クラウド声の音量(0.0〜2.0)。上限まで引き上げ(2026-07-22 音が小さい報告対応)
+# nコ展(7/24-26)向けに引き上げ(2026-07-19 KASO承認「お金かけてもいい」)。
+# ¥440/万字 → 40,000字/日 = 最大¥1,760/日・声つき約40セッション/日。展示後に15000へ戻してよい
+AIVIS_DAILY_CHAR_CAP = "40000"
 # 事後アンケート回答の通知メール(Resend)。RESEND_API_KEY は secret(`wrangler secret put RESEND_API_KEY`)。
 # 未設定なら通知はスキップ(回答のD1保存はそのまま動く)。差出人は既定 onboarding@resend.dev
 # (独自ドメイン不要・Resend登録アドレス=この NOTIFY_EMAIL 宛にのみ送れる)。
