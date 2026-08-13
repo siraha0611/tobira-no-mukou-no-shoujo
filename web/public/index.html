@@ -1137,6 +1137,13 @@ function refreshChips(){
 }
 
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// 通信そのものが届かなかった種類の失敗か(圏外・回線断・タイムアウト)。
+// サーバが応答を返した上でのエラー(上限・トークン切れ等)はこれに当たらない。
+function isNetworkish(err){
+  const n=(err&&err.name)||'';
+  if(n==='AbortError'||n==='TimeoutError'||n==='TypeError')return true;
+  return /fetch|network|failed to fetch|load failed/i.test((err&&err.message)||'');
+}
 function setKP(t){kp.classList.remove('show');return new Promise(r=>setTimeout(()=>{kp.textContent=t;kp.classList.add('show');r()},320))}
 function setBeat(n){stage=Math.max(0,Math.min(n||0,5));document.body.setAttribute('data-beat',String(stage));try{fx.setStage(stage);ambient.setStage(stage)}catch(_){}}
 function setMood(m){document.body.setAttribute('data-mood',m||'calm')}
@@ -1402,10 +1409,46 @@ async function start(){
   await present(d);
   showControls('彼女に、話しかけてください。なんの話でも、いいんです');
   refreshChips();saveState();
-  autoListen();
+  autoListen();webStartNudge();
   }finally{busy=false;busySince=0}
 }
 function showControls(h){$('controls').classList.remove('hidden');hint.textContent=h||'';if(window.innerWidth>700)sayEl.focus()}
+
+// ── 沈黙の呼びかけ(Web版) ──
+// 展示の「待ち受けの呼びかけ」を、一人で遊ぶWeb版向けに作り直したもの。
+// 展示は通りすがりを振り向かせるのが目的だったが、Web版の相手はもう扉の前にいる。
+// だから急かさず、「黙っていてもいい」という設計を保ったまま、話しかける手がかりだけを置く。
+// 台詞は内蔵の固定文なので、大規模言語モデルは呼ばない(費用も増えない)。
+const WEB_NUDGE_LINES=[
+  'だいじょうぶ。ゆっくりで、いいですよ',
+  'なんでも、いいんです。今日あったことでも',
+  'わたし、待つのは得意です。ずっと、待っていましたから',
+  '……もしよければ。すきな食べもののこと、聞いてみたいです'
+];
+const WEB_NUDGE_DELAYS=[60000,105000,165000]; // 回を追うごとに間を空ける(しつこくしない)
+let webLastActivity=0, webNudgeCount=0, webNudgeTimer=null, webNudging=false;
+function webTouchActivity(){webLastActivity=Date.now()}
+function webStartNudge(){
+  if(EXHIBIT)return;
+  webLastActivity=Date.now();webNudgeCount=0;
+  clearInterval(webNudgeTimer);
+  webNudgeTimer=setInterval(webMaybeNudge,5000);
+}
+function webStopNudge(){clearInterval(webNudgeTimer);webNudgeTimer=null}
+async function webMaybeNudge(){
+  if(EXHIBIT||busy||done||webNudging)return;
+  if(webNudgeCount>=WEB_NUDGE_DELAYS.length)return;
+  if(sayEl&&sayEl.value.trim())return; // 書きかけの人の邪魔をしない
+  if(document.hidden)return;           // タブを離れている間は待ち時間に数えない
+  if(Date.now()-webLastActivity<WEB_NUDGE_DELAYS[webNudgeCount])return;
+  webNudging=true;webNudgeCount++;webLastActivity=Date.now();
+  try{
+    const line=WEB_NUDGE_LINES[(webNudgeCount-1)%WEB_NUDGE_LINES.length];
+    await setKP(line);
+    await speak(line);
+  }catch(_){}finally{webNudging=false}
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)webTouchActivity()});
 function hideControls(){$('controls').classList.add('hidden')}
 
 async function turn(text){
@@ -1431,14 +1474,20 @@ async function turn(text){
         if(r.status===503){if(!EXHIBIT){showThinking(false);await setKP(j.message||'本日の体験枠は終了しました。また明日、扉の前へ。');return}}
         else if(r.status===401||r.status===409){if(!EXHIBIT){showThinking(false);clearState();await setKP(j.message||'扉の合図が切れました。はじめからお試しください。');return}}
         else if(r.status===429){if(!EXHIBIT){showThinking(false);clearState();await setKP(j.message||'この扉の前で話せる時間は、ここまでです。');return}}
-        else if(!r.ok)throw new Error(j.message||'turn_failed');
+        else if(!r.ok){
+          // 5xxは自分たちの側の失敗。Web版も内蔵の綾香へ引き継いで体験を切らさない
+          if(!EXHIBIT&&r.status>=500){d=null}
+          else throw new Error(j.message||'turn_failed');
+        }
         else{d=j;token=d.token||token}
       }catch(err){
-        if(!EXHIBIT)throw err;
+        // 通信断・タイムアウトは内蔵の綾香が引き継ぐ(Web版も同様)。
+        // 日次上限(503)・トークン切れ(401/409)・時間切れ(429)は上で処理済みで、ここには来ない
+        if(!EXHIBIT&&!isNetworkish(err))throw err;
       }
-      if(!d){ // 展示: 通信断・上限・トークン切れ → 内蔵の綾香が黙って引き継ぐ(展示を止めない)
+      if(!d){ // 通信断・上限・トークン切れ → 内蔵の綾香が黙って引き継ぐ(体験を止めない)
         engineOffline=true;OFFLINE.adopt({stage,turns,opened});
-        try{$('engineline').textContent='展示モード(内蔵の綾香)'}catch(_){}
+        try{$('engineline').textContent=EXHIBIT?'展示モード(内蔵の綾香)':'内蔵の綾香'}catch(_){}
         d=OFFLINE.turn(text,{stage,turns:turns+1,opened});
       }
     }
@@ -1451,6 +1500,7 @@ async function turn(text){
     if(EXHIBIT&&myGen!==exGen)return;
     if(done){
       busySince=0; // 結末の演出・休止は正常に長い(数分)ので、以後は見張り係のスタック検知の対象から外す
+      webStopNudge();
       await ending();saveState();
     }else{
       showControls('');refreshChips();autoListen();
@@ -1471,13 +1521,14 @@ async function ending(){
 }
 function submitSay(){
   const v=sayEl.value.trim();sayEl.value='';
+  webTouchActivity();
   if(!v)return;
   if(EXHIBIT&&exState==='attract'){exBegin(v);return} // 展示の操作パネルから手動で始める場合
   turn(v);
 }
 $('send').onclick=submitSay;
 sayEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing)submitSay()});
-$('silent').onclick=()=>turn('');
+$('silent').onclick=()=>{webTouchActivity();turn('')};
 $('enter').onclick=start;
 $('replay').onclick=()=>{clearState();location.reload()};
 $('finlog').onclick=()=>{$('log').classList.add('open')};
@@ -1535,7 +1586,7 @@ function tryResume(){
     await setKP('……');
     showControls('おかえりなさい。つづきを、どうぞ');
     refreshChips();
-    autoListen();
+    autoListen();webStartNudge();
   };
 }
 async function safeJson(r){try{return await r.json()}catch(_){return {}}}
