@@ -445,11 +445,17 @@ async function handleTts(request: Request, env: Env): Promise<Response> {
         output_format: "mp3",
         use_ssml: false,
         style_id: Number(env.AIVIS_STYLE_ID ?? 2) || 0,
-        // 展示会場向けの音量(0.0〜2.0・既定1.0は小さい)。AIVIS_VOLUMEで調整可
-        volume: Math.max(0, Math.min(2, Number(env.AIVIS_VOLUME || "1.6") || 1.6)),
+        // 展示会場向けの音量(0.0〜2.0・既定1.0は小さい)。AIVIS_VOLUMEで調整可(0も有効な値として扱う)
+        volume: (() => {
+          const v = Number.parseFloat(env.AIVIS_VOLUME ?? "");
+          return Math.max(0, Math.min(2, Number.isFinite(v) ? v : 1.6));
+        })(),
       }),
     });
     if (!resp.ok) {
+      // 原因調査用: Aivis側の生のステータスを残す(クレジット切れ=402/認証=401/レート=429の切り分け)
+      const errBody = await resp.text().catch(() => "");
+      console.log("aivis_tts_failed", resp.status, errBody.slice(0, 300));
       return new Response(null, { status: 503 });
     }
 
@@ -701,7 +707,11 @@ async function logResearchTurn(
 
   try {
     const maxStage = clampInt(stage, 0, 5);
-    const transcript = env.RESEARCH_TRANSCRIPT === "true" ? formatTranscript(history) : null;
+    // 一般公開のWeb版(WEB-接頭辞)は匿名の集計値のみを記録し、会話本文は保存しない。
+    // 会話本文を保存するのは展示(EXH-)と、明示的な研究モード(?pid=)に限る。
+    const isPublicWeb = participantId.startsWith("WEB-");
+    const transcript =
+      env.RESEARCH_TRANSCRIPT === "true" && !isPublicWeb ? formatTranscript(history) : null;
 
     if (ended) {
       const endedAt = new Date();

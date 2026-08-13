@@ -21,10 +21,11 @@ database_id = "37d8544a-d407-47db-9dfc-2be4b5f798d2"
 migrations_dir = "migrations"
 
 [vars]
-# コスト上限: KASO「月$5まで」(2026-06-18)。/start・/turn・/letter全てがJST日次でカウントされ、
-# cap到達で503。保守的見積(最悪¥0.5/call)でも 50×30×¥0.5≒¥750≒$5/月 に収まる安全側設定。
-# ※Anthropic Console側の月$5ハード上限(要KASOログイン)を併設したら、launch用に引き上げ可。
-DAILY_CALL_CAP = "50"
+# コスト上限: KASO「月$5まで」(2026-06-18)が通常運用の既定値だが、
+# nコ展(7/24-26)会期中は50/日だと即枯渇し内蔵台本エンジンに落ちてしまう(2026-07-24発覚・実際に発生)ため600へ引き上げ。
+# 最悪見積(¥0.5/call)でも 600×3日×¥0.5≒¥900。展示終了後は必ず"50"へ戻すこと。
+# ※Anthropic Console側の月次spend上限(要KASOログイン)は未確認のため、上限額を体で保証しているのはこの値のみ。
+DAILY_CALL_CAP = "600"
 AIVIS_TTS_ENABLED = "true"
 AIVIS_MODEL_UUID = "22e8ed77-94fe-4ef2-871f-a86f94e9a579"  # コハク(オズチャット/CV ねゆたろ)
 AIVIS_STYLE_ID = "2"  # コハクのスタイル 0=ノーマル/1=あまあま/2=せつなめ/3=ねむたい
@@ -40,5 +41,7 @@ TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 # v1はTurnstileを無効で公開(日次上限+セッショントークン+ターン上限で保護)。
 # 本物のTurnstile設定後に "true" にし、public/index.htmlのdata-sitekeyを実キーへ。
 TURNSTILE_ENABLED = "false"
-# Transcript capture is opt-in for research sessions; leave unset or "false" by default.
-# RESEARCH_TRANSCRIPT = "false"
+# 展示(nコ展 7/24-26)の会話記録用に有効化(2026-07-24・KASO承認)。
+# 展示の各セッションはフロントが自動でparticipantId(EXH-...)を発行してD1(sessions.transcript)に記録される。
+# 通常Web版は?pidが無ければ何も記録されない(挙動は従来通り)。
+RESEARCH_TRANSCRIPT = "true"

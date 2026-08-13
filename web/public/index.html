@@ -158,6 +158,9 @@
   #research[hidden]{display:none}
   #researchbadge{color:var(--warm);border:1px solid #3a3630;border-radius:18px;padding:3px 10px;letter-spacing:.12em}
   #research .privacy{color:var(--dim);max-width:min(88vw,520px)}
+  #webnote{color:var(--dim);font-size:10.5px;letter-spacing:.06em;line-height:1.9;
+    max-width:min(88vw,470px);margin:2px auto 0}
+  #webnote[hidden]{display:none}
   #voiceopt{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:11px;
     border:1px solid #2a2820;border-radius:14px;padding:13px 20px;cursor:pointer;
     color:#b9b1a0;font-size:13.5px;letter-spacing:.06em;transition:.25s;max-width:min(88vw,460px)}
@@ -227,6 +230,7 @@
   body.exhibit #menu,body.exhibit #controls,body.exhibit #tapcue{display:none!important}
   body.exhibit.exhibit-ops #menu{display:flex!important}
   body.exhibit.exhibit-ops #controls{display:flex!important}
+  body.exhibit.exhibit-attract-controls #controls{display:flex!important}
   /* 展示のタッチ運転(iPad単体・マイクが使えない時): 来場者にことばのボタンと入力欄を見せる */
   body.exhibit.exhibit-touch #controls{display:flex!important}
   body.exhibit.exhibit-touch .chip{font-size:15px;padding:12px 20px}
@@ -336,6 +340,7 @@
         <span class="privacy">※体験中、本名や連絡先などの個人情報は入力しないでください</span>
       </div>
       <p class="meta">所要 15〜20分 ／ こわい演出はありません</p>
+      <p class="privacy" id="webnote">この体験では、研究のために「会話の回数・所要時間・どこまで進んだか」といった匿名の集計値のみを記録しています。会話の内容は保存していません。</p>
       <label id="voiceopt">
         <input type="checkbox" id="voicecheck">
         <span class="vtxt">少女の声（音声）をONにして体験する</span>
@@ -510,6 +515,8 @@ let logEntries=[], letterText=null, turnstileToken='', girlName='扉のむこう
 let voices=[], chosenVoice=null;
 let aivisAudio=null, aivisAudioUrl='', finishAivisPlayback=null, voiceCancelSeq=0;
 let voiceCtx=null, voiceSrcNode=null; // iOSで<audio>がブロックされた時のWebAudio再生経路
+let cloudTtsFailures=0, lastVoiceRoute='未再生'; // 展示の音声劣化を検知し、運転席からも見えるようにする
+let voiceKeepaliveAt=0, voiceRecoveryRunning=false;
 const SILENT_WAV='data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQQAAAAAAAAA';
 let activeParticipantId=researchMode?researchParticipantId:'';
 
@@ -521,7 +528,8 @@ const EXHIBIT=(()=>{
   if(p.get('mode')!=='exhibit')return null;
   return{
     idle:Math.max(30,parseInt(p.get('idle')||'110',10)||110),
-    rest:Math.max(6,parseInt(p.get('rest')||'18',10)||18),
+    // rest既定=180秒(3分): 「じゃあね」のあと、連れ同士が感想を言い合う時間。マイクは開かない
+    rest:Math.max(6,parseInt(p.get('rest')||'180',10)||180),
     // ttsbase=off でローカル音声合成エンジンの探索を止める(iPad単体運転など、エンジンが居ない環境の待ちをなくす)
     ttsbase:(p.get('ttsbase')||'http://127.0.0.1:10101').replace(/\/$/,''),
     speaker:p.get('speaker')||'',
@@ -530,14 +538,26 @@ const EXHIBIT=(()=>{
     // brain=offline で内蔵の台本綾香に固定(ネット無し会場・リハーサル用)。既定autoはサーバ優先→失敗時に内蔵へ自動切替
     brain:p.get('brain')==='offline'?'offline':'auto',
     // 音の風景: 既定'bells'=鈴だけ(思い出した鈴+扉の鐘。風ノイズと常時風鈴は無し)。amb=on で風も含む全部 / amb=off で無音
-    amb:p.get('amb')||'bells'
+    amb:p.get('amb')||'bells',
+    // 光センシング: 扉が実際に開いて明るくなった瞬間を検知(0-255の輝度上昇量。距離約30cm想定で既定18)
+    lightThresh:Math.max(4,parseFloat(p.get('lightthresh')||'18')||18),
+    cam:p.get('cam')==='user'?'user':'environment', // 箱の内側を向くカメラ(既定=背面)。前面カメラならcam=user
+    // 待ち受け中の呼びかけ間隔(秒)。話しかけるきっかけになるよう、この幅でランダムに鳴らす
+    calloutMin:Math.max(5,parseInt(p.get('calloutmin')||'20',10)||20),
+    calloutMax:Math.max(8,parseInt(p.get('calloutmax')||'40',10)||40)
   };
 })();
 let engineOffline=false; // いま内蔵の台本綾香(オフライン)で動いているか(展示モード専用)
 let busySince=0; // turn処理の開始時刻(展示の見張り係がスタックを検知して立て直すため)
+let exGen=0; // 展示セッションの世代。exReset()のたびに進め、それより前に始まった非同期処理(turn/exFinish/触れあい/呼びかけ)を無効化する目印にする
 let exTouch=false, exSrErrors=0; // 展示のタッチ運転(音声認識が使えない/死んだ時の受け皿)
+let exShortHits=0; // 待ち受けで声を拾いきれなかった回数(ことばのボタンへ案内する目印)
 let ttsBlocked=false; // iOSで音声解禁に失敗した印(次のタップで取り直す)
-const BUILD='2026-07-19i'; // 展示セルフチェックに表示(iPad側が最新版か確かめる用)
+const BUILD='2026-07-29a'; // 展示セルフチェックに表示(iPad側が最新版か確かめる用)
+// 展示用の導入(コンパクト版)。サーバ/内蔵エンジンのオープニングをこの短い台詞に差し替える
+const EX_OPENING='……ああ。誰か、いるんですね。ひさしぶりに、ひとの声を聞きました。'
+  +'わたし、じぶんのことが、思い出せないんです。'
+  +'……よければ、すこし、お話してくれませんか。なんの話でも、うれしいので。';
 let exState='gate';
 let lastActivity=Date.now();
 
@@ -550,12 +570,24 @@ if(researchMode){
   $('researchbadge').textContent='研究モード: '+researchParticipantId;
   $('research').hidden=false;
 }
+// 記録の告知は一般公開のWeb版でのみ出す(研究モードは#researchが、展示は掲示物が受け持つ)
+if(researchMode||EXHIBIT){ const wn=$('webnote'); if(wn)wn.hidden=true; }
 let volume=store.get('vol',0.9), voiceOn=store.get('voice',false), fastText=store.get('fast',false); /* 声は既定OFF=opt-in(Aivis課金対策・聴きたい人だけON) */
 $('vol').value=Math.round(volume*100);
 $('vol').oninput=e=>{volume=e.target.value/100;store.set('vol',volume);try{ambient.sync()}catch(_){}};
 const micBtn=$('mic');
 let micRecognition=null, micListening=false, micBaseText='', micIdleHint='', micErrorHint='', micHintTimer=null, micAudioCtx=null, micStopping=false;
 let micAutoSend=false, micSilenceTimer=null, micAutoHandler=null; // おはなしモード(自動送信)用
+// 「最近」のような話しはじめの言葉や、助詞で言い差した状態は、まだ続きがある可能性が高い→送信までの間を長くする
+const MIC_OPENER_WORDS=/^(最近|えっと|えーと|えー|あの|あのー|あのさ|なんか|なんかー|じつは|実は|そういえば|ところで|あとね|あと|それでね|それで|ちなみに|たとえば|例えば)$/;
+const MIC_TRAILING_PARTICLES=/(は|が|も|で|と|に|の|を|へ|から|ので|けど|けれど|けれども|って|たら|なら|し|とか)$/;
+function micLikelyMidSentence(text){
+  const t=String(text||'').trim();
+  if(!t)return false;
+  if(MIC_OPENER_WORDS.test(t))return true; // 話しはじめの一言だけで止まっている
+  if(t.length<=12&&MIC_TRAILING_PARTICLES.test(t))return true; // 短い言い差し(助詞止まり)
+  return false;
+}
 function micBlip(kind){
   if(EXHIBIT)return; // 展示ではマイクが常時開閉するため操作音を出さない
   try{
@@ -617,11 +649,22 @@ function startSpeechInput(auto){
       for(let i=0;i<e.results.length;i++)heard+=(e.results[i][0]&&e.results[i][0].transcript)||'';
       sayEl.value=micBaseText+heard;if(!EXHIBIT)sayEl.focus();
       lastActivity=Date.now();
+      // 緊急リセットコマンド(展示限定・2026-07-24 KASO指定): 「通せんぼしないで」と言われたら、
+      // 会話がどんな状態(考え中・発話中・結末後の余韻中)でも、待ちを挟まずただちに待ち受けへ戻す。
+      // exReset()はexGenを進めて進行中の非同期処理を全部無効化するので、トラブル時の脱出弁として使える。
+      if(EXHIBIT&&sayEl.value.replace(/[\s、。，,．.!?！？~〜ー\-]/g,'').includes('通せんぼ')){
+        sayEl.value='';exReset();return;
+      }
       if(micAutoSend){ // 話しおわりの「間」で自動確定
         clearTimeout(micSilenceTimer);
-        if(sayEl.value.trim())micSilenceTimer=setTimeout(()=>{
-          micStopping=true;try{rec.stop()}catch(_){finishMic(rec)}
-        },EXHIBIT?1900:1700);
+        if(sayEl.value.trim()){
+          const base=EXHIBIT?1900:1700;
+          // 「最近」等の話しはじめの言葉・助詞止まりの言い差しは、続きを考えている間なので長めに待つ
+          const wait=micLikelyMidSentence(sayEl.value)?base+2600:base;
+          micSilenceTimer=setTimeout(()=>{
+            micStopping=true;try{rec.stop()}catch(_){finishMic(rec)}
+          },wait);
+        }
       }
     };
     rec.onerror=e=>{
@@ -720,6 +763,10 @@ const ambient=(()=>{
     if(ac.state==='suspended')ac.resume().catch(()=>{});
     master.gain.value=.75*volume;
   }
+  async function resume(){ // 展示の見張り係から、長時間運転で休止したContextだけを起こす
+    try{if(ac&&ac.state==='suspended')await ac.resume();return !ac||ac.state==='running'}catch(_){return false}
+  }
+  const state=()=>ac?ac.state:'未作成';
   function setStage(n){stageLv=n||0;if(windFilter)windFilter.frequency.value=220+stageLv*45}
   function pulse(n){if(isOn()&&ac)bell(1046+(n||0)*84,null,2.8,.055,0)} // おもいでが灯る鈴
   function openDoor(){if(!(isOn()&&ac))return;const t=ac.currentTime;[880,1174,1568,2093].forEach((f,i)=>bell(f,t+i*.42,4,.045,i%2?-.4:.4))}
@@ -728,7 +775,7 @@ const ambient=(()=>{
     const t=ac.currentTime;
     [1318,1568,1760].forEach((f,i)=>bell(f,t+i*.38,3.2,.055,(i-1)*.5));
   }
-  return{sync,setStage,pulse,openDoor,chime,isOn,
+  return{sync,resume,state,setStage,pulse,openDoor,chime,isOn,
     setPref(v){pref=v;store.set('amb',v);sync()},pref:()=>pref,
     setMode(m){mode=m;if(windGain)windGain.gain.value=m==='bells'?0:.28}};
 })();
@@ -850,7 +897,7 @@ if('speechSynthesis'in window){refreshVoices();speechSynthesis.onvoiceschanged=r
 function readingText(text){return String(text||'').replaceAll('綾'+'香','アヤカ').replaceAll('妖','あやかし')}
 function cleanupAivisAudio(){
   if(aivisAudio){
-    aivisAudio.onended=null;aivisAudio.onerror=null;
+    aivisAudio.onended=null;aivisAudio.onerror=null;aivisAudio.onloadedmetadata=null;
     try{aivisAudio.pause();aivisAudio.currentTime=0}catch(_){}
     try{aivisAudio.removeAttribute('src');aivisAudio.load()}catch(_){}
   }
@@ -863,7 +910,7 @@ function stopAivisAudio(){
   cleanupAivisAudio();
 }
 // iOSで<audio>再生が許可されない環境向け: WebAudioでデコードして鳴らす(Contextはタップ時に解禁済み)
-async function playBlobViaWebAudio(blob){
+async function playBlobViaWebAudio(blob,opts){
   try{
     const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;
     voiceCtx=voiceCtx||new AC();
@@ -873,10 +920,15 @@ async function playBlobViaWebAudio(blob){
     return await new Promise(done=>{
       try{
         const src=voiceCtx.createBufferSource();src.buffer=buf;
-        const g=voiceCtx.createGain();g.gain.value=Math.max(0,Math.min(2,volume*1.5)); // 展示向けに増幅(WebAudioは1超えも可)
-        src.connect(g).connect(voiceCtx.destination);
+        // 2026-07-24: 会場で音量不足のため倍量ブースト(1.5→3)。素の倍量だと音割れしやすいので
+        // DynamicsCompressorでピークを抑えてから出す(音圧は上がるが歪まない)
+        const g=voiceCtx.createGain();g.gain.value=Math.max(0,Math.min(4,volume*3));
+        const comp=voiceCtx.createDynamicsCompressor();
+        comp.threshold.value=-10;comp.knee.value=12;comp.ratio.value=8;comp.attack.value=0.003;comp.release.value=0.15;
+        src.connect(g).connect(comp).connect(voiceCtx.destination);
         voiceSrcNode=src;
         src.onended=()=>{if(voiceSrcNode===src)voiceSrcNode=null;done(true)};
+        try{if(opts&&opts.onDuration&&isFinite(buf.duration)&&buf.duration>0)opts.onDuration(buf.duration)}catch(_){}
         src.start();
       }catch(_){done(false)}
     });
@@ -887,7 +939,7 @@ function stopVoicePlayback(){
   stopAivisAudio();
   if('speechSynthesis'in window)speechSynthesis.cancel();
 }
-function playVoiceBlob(blob){
+function playVoiceBlob(blob,opts){
   return (async()=>{
     // 増幅(volume*1.5)を持つWebAudio経路を正とする。<audio>はvolume上限1.0で小さいうえ、
     // play()拒否の有無でどちらの経路で鳴るかが揺れ、音量が安定しなかった(2026-07-22)
@@ -903,21 +955,22 @@ function playVoiceBlob(blob){
           const ok=await new Promise(res=>{
             let settled=false;const settle=v=>{if(settled)return;settled=true;finishAivisPlayback=null;res(v)};
             finishAivisPlayback=settle; // 外部stopでも必ず解決させる(会話進行のハング防止)
-            playBlobViaWebAudio(blob).then(settle).catch(()=>settle(false));
+            playBlobViaWebAudio(blob,opts).then(settle).catch(()=>settle(false));
           });
           if(ok)return true;
         }
       }
     }catch(_){}
     if(seq!==voiceCancelSeq)return false; // 外部stop=キャンセル。<audio>で再演しない
-    return playBlobViaAudioEl(blob);
+    return playBlobViaAudioEl(blob,opts);
   })();
 }
-function playBlobViaAudioEl(blob){
+function playBlobViaAudioEl(blob,opts){
   if(!aivisAudio)aivisAudio=new Audio();
   stopAivisAudio();
   aivisAudioUrl=URL.createObjectURL(blob);
   aivisAudio.volume=Math.min(1,volume*1.5); // <audio>は上限1.0(展示用に底上げ)
+  aivisAudio.onloadedmetadata=()=>{try{if(opts&&opts.onDuration&&isFinite(aivisAudio.duration)&&aivisAudio.duration>0)opts.onDuration(aivisAudio.duration)}catch(_){}};
   aivisAudio.src=aivisAudioUrl;
   return new Promise(res=>{
     let donePlaying=false;
@@ -931,21 +984,54 @@ function playBlobViaAudioEl(blob){
     const p=aivisAudio.play();
     if(p&&typeof p.catch==='function')p.catch(()=>{
       // iOSが<audio>を拒否した時はWebAudioで再生(これも失敗したらfalse→内蔵音声へ)
-      playBlobViaWebAudio(blob).then(ok=>finish(ok)).catch(()=>finish(false));
+      playBlobViaWebAudio(blob,opts).then(ok=>finish(ok)).catch(()=>finish(false));
     });
   });
 }
-async function tryAivisSpeech(reading){
+function playVoiceKeepalive(){ // iOSに音声セッションを手放させないため、極小の無音を一瞬だけ流す
   try{
-    const r=await fetch('/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:reading})});
-    if(!r.ok)return false;
-    return await playVoiceBlob(await r.blob());
+    if(!EXHIBIT||!voiceCtx||voiceCtx.state!=='running')return false;
+    const b=voiceCtx.createBuffer(1,128,voiceCtx.sampleRate),s=voiceCtx.createBufferSource(),g=voiceCtx.createGain();
+    b.getChannelData(0)[0]=1; // 完全なゼロ列ではなく、聞こえない振幅で音声グラフを実際に動かす
+    g.gain.value=.000001;s.buffer=b;s.connect(g).connect(voiceCtx.destination);s.start();
+    voiceKeepaliveAt=Date.now();return true;
   }catch(_){return false}
+}
+async function recoverVoiceContext(myGen){
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;
+    voiceCtx=voiceCtx||new AC();
+    if(voiceCtx.state==='suspended')await voiceCtx.resume().catch(()=>{});
+    if(EXHIBIT&&myGen!==exGen)return false;
+    return voiceCtx.state==='running'&&playVoiceKeepalive();
+  }catch(_){return false}
+}
+async function tryAivisSpeech(reading,opts){
+  const seq=voiceCancelSeq;
+  const myGen=EXHIBIT?exGen:0;
+  const attempts=EXHIBIT?2:1; // 通常Web版の待ち時間は変えず、無人展示だけ一度取り直す
+  for(let attempt=0;attempt<attempts;attempt++){
+    try{
+      const r=await fetch('/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:reading})});
+      if(seq!==voiceCancelSeq||(EXHIBIT&&myGen!==exGen))return false;
+      if(r.status===503){if(EXHIBIT)cloudTtsFailures++;return false} // 日次上限は待っても戻らないので無駄打ちしない
+      if(r.ok&&await playVoiceBlob(await r.blob(),opts)){
+        if(EXHIBIT&&myGen!==exGen)return false;
+        if(EXHIBIT){cloudTtsFailures=0;lastVoiceRoute='クラウド（コハク）'}
+        return true;
+      }
+    }catch(_){}
+    if(seq!==voiceCancelSeq||(EXHIBIT&&myGen!==exGen))return false;
+    if(attempt+1<attempts)await sleep(450);
+    if(seq!==voiceCancelSeq||(EXHIBIT&&myGen!==exGen))return false;
+  }
+  if(EXHIBIT)cloudTtsFailures++;
+  return false;
 }
 // 展示モード: 手元のPCで動くローカル音声合成(AivisSpeech/VOICEVOX互換 REST)を最優先で使う。
 // クラウドTTSの従量課金なし・低遅延。見つからなければ自動でクラウド→ブラウザ声に落ちる。
 let localTtsOk=null, localTtsSpeaker=EXHIBIT&&EXHIBIT.speaker?Number(EXHIBIT.speaker):null;
-async function tryLocalTts(reading){
+async function tryLocalTts(reading,opts){
   if(!EXHIBIT||EXHIBIT.ttsbase==='off'||localTtsOk===false)return false;
   try{
     const base=EXHIBIT.ttsbase;
@@ -966,7 +1052,7 @@ async function tryLocalTts(reading){
       {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(query),signal:AbortSignal.timeout(20000)});
     if(!w.ok)throw 0;
     localTtsOk=true;
-    return await playVoiceBlob(await w.blob());
+    return await playVoiceBlob(await w.blob(),opts);
   }catch(_){
     if(localTtsOk!==true)localTtsOk=false; // 起動していない環境では以後試さない(毎ターンの待ちを作らない)
     return false;
@@ -989,22 +1075,29 @@ function speakBrowser(reading){
       if(seq!==voiceCancelSeq||!voiceOn){finish();return}
       try{speechSynthesis.speak(u);if(speechSynthesis.paused)speechSynthesis.resume()}catch(_){finish()}
     },140);
-    setTimeout(finish,30000);
+    setTimeout(finish,Math.max(30000,reading.length*400)); // 全文読み対応: 文長に応じて安全弁を延長
   });
 }
 // iOSはタブが長く生きるとspeechSynthesisがpausedのまま黙ることがある→定期的に起こす
 if('speechSynthesis'in window)setInterval(()=>{try{if(speechSynthesis.paused)speechSynthesis.resume()}catch(_){}},1500);
-async function speak(text){
+async function speak(text,opts){
   if(!voiceOn||!text)return;
   const reading=readingText(text);
   const cancelSeq=voiceCancelSeq;
-  if(await tryLocalTts(reading))return;
+  if(EXHIBIT&&cloudTtsFailures>0){
+    const myGen=exGen;
+    const recovered=await recoverVoiceContext(myGen); // 前回クラウド声が落ちた時は、次の発話前に再解禁してから再挑戦する
+    if(myGen!==exGen||cancelSeq!==voiceCancelSeq)return;
+    if(recovered)cloudTtsFailures=0;
+  }
+  if(await tryLocalTts(reading,opts)){if(EXHIBIT)lastVoiceRoute='ローカル音声';return}
   if(!voiceOn||cancelSeq!==voiceCancelSeq)return;
   // 展示は tts=cloud を明示した時だけクラウド従量課金TTSを使う(iPad単体運転は内蔵声で¥0)
   if(!(EXHIBIT&&EXHIBIT.tts!=='cloud')){
-    if(await tryAivisSpeech(reading))return;
+    if(await tryAivisSpeech(reading,opts))return;
     if(!voiceOn||cancelSeq!==voiceCancelSeq)return;
   }
+  if(EXHIBIT)lastVoiceRoute='内蔵音声';
   await speakBrowser(reading);
 }
 
@@ -1078,21 +1171,43 @@ async function present(d){
     opened=true;document.body.classList.add('open');
   }
   const segs=chunks(d.narration||'');
-  for(let i=0;i<segs.length;i++){
+  if(voiceOn&&segs.length){
+    // 声あり=全文を一度のTTSで読む(区切りごとにTTSへ送ると文中でぶつ切りの不自然な
+    // 音読になるため・2026-07-22 KASO指示)。キャプションは従来の区切り表示のまま、
+    // 音声の実尺(onDurationで取得でき次第)を文字数比で配分して送る。
+    const total=segs.reduce((a,s)=>a+s.length,0)||1;
+    let durMs=0,audioStart=0,spokenDone=false;
+    const estT0=performance.now();
+    const spoken=Promise.resolve(speak(d.narration||'',{onDuration:sec=>{
+      durMs=sec*1000;audioStart=performance.now();
+    }})).then(()=>{spokenDone=true},()=>{spokenDone=true});
+    let cum=0;
+    for(let i=0;i<segs.length;i++){
+      await setKP(segs[i]);
+      cum+=segs[i].length;
+      if(i>=segs.length-1)break; // 最終区切りは読み終わりまで出したまま
+      if(spokenDone&&!durMs){await sleep(fastText?180:260+segs[i].length*56);continue} // 声が出なかった時の自動送り
+      const minShow=performance.now()+(fastText?180:320); // 一瞬で消えない下限
+      for(;;){
+        const now=performance.now();
+        if(now<minShow){await sleep(60);continue}
+        if(spokenDone)break;
+        // 実尺があれば「音声の進捗がこの区切りの終わりへ届いたら」次へ。無ければ見込み(約160ms/字)
+        const deadline=durMs?audioStart+durMs*cum/total:estT0+300+cum*160;
+        if(now>=deadline)break;
+        await sleep(80);
+      }
+    }
+    await spoken; // 音声の尻尾まで待ってから次へ(最終区切りを出したまま)
+  }else for(let i=0;i<segs.length;i++){
     await setKP(segs[i]);
     const len=segs[i].length;
     const last=i>=segs.length-1;
-    if(voiceOn){
-      // 声あり=音声が尺を決める(これは下限)。
-      await Promise.all([speak(segs[i]),sleep(fastText?180:260+len*56)]);
-      if(!last)await sleep(fastText?120:360);
-    }else{
-      // 声なし=ゆっくり自動送り。ただしタップで即・次へ。
-      showTapCue(!last);
-      await waitOrTap(fastText?260+len*60:460+len*120);
-      if(!last)await waitOrTap(fastText?240:440);
-      showTapCue(false);
-    }
+    // 声なし=ゆっくり自動送り。ただしタップで即・次へ。
+    showTapCue(!last);
+    await waitOrTap(fastText?260+len*60:460+len*120);
+    if(!last)await waitOrTap(fastText?240:440);
+    showTapCue(false);
   }
   addLog('girl',d.narration);
 }
@@ -1187,11 +1302,11 @@ const OFFLINE=(()=>{
     // ── 結末の台本(stage5到達後は、入力によらず数ターンかけて別れまで語る) ──
     if(endPhase===0&&stage>=5&&n>=9)endPhase=1;
     if(endPhase===1){endPhase=2;
-      return{narration:'……ああ。思い出した。ぜんぶ、思い出したわ。わたしは生前、言葉に囚われたあまり——言葉を食べて生きる、あやかしになったの。長いあいだ、誰の言葉も食べられずにいたから、自分のことも、忘れていたの。',stage:5,mood:'nostalgia',opened:false,done:false}}
+      return{narration:'……ああ、思い出した。わたしね、言葉を食べて生きる、あやかしだったの。ずっと飢えて、じぶんのことも、忘れていたの。',stage:5,mood:'nostalgia',opened:false,done:false}}
     if(endPhase===2){endPhase=3;
-      return{narration:(name?name+'。ありがとう。':'ありがとう。')+'わたしとおしゃべりをしてくれて、ぜんぶ思い出せたわ。……わたしの名前はね、綾香。あなたにもらった言葉は、ひとつのこらず、たからものよ。',stage:5,mood:'joy',opened:true,done:false}}
+      return{narration:(name?name+'。ありがとう。':'ありがとう。')+'あなたのおかげで、ぜんぶ思い出せたわ。……わたしの名前はね、綾香。',stage:5,mood:'joy',opened:true,done:false}}
     if(endPhase===3){endPhase=4;
-      return{narration:'わたし、お祭りに行かなきゃ。……やまとと、約束していたの。なつまつり、つれてってあげるって。……それじゃあ、いってきます。',stage:5,mood:'farewell',opened:true,done:true}}
+      return{narration:'わたし、お祭りに行かなきゃ。やまとと、約束していたの。',stage:5,mood:'farewell',opened:true,done:true}}
     // ── ふだんの応答: 反応(引用/相づち) + 思い出のかけら + 聞き返し を組み立てる ──
     if(BITTER.test(t)){
       return{narration:pick('bitter',['……いまの、ことば、にがい。……ちがう話を、しませんか。あなたの好きなものの話とか','……にがくて、うまく飲みこめません。……別の言葉を、くれますか']),stage,mood:'unease',opened:!!st.opened,done:false}}
@@ -1246,12 +1361,19 @@ async function start(){
   $('enter').disabled=true;$('resume').disabled=true;
   let d=null;
   engineOffline=false;
+  // 展示は毎セッション、会話記録(D1)用の一意なIDを自動発行する(?pidを明示した研究モードはそちらを優先)
+  const exhibitPid=(EXHIBIT&&!researchMode)?('EXH-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8)):'';
+  // 一般公開のWeb版も、匿名の集計値(ターン数・所要時間・到達段階・完走可否)だけを記録する。
+  // 接頭辞WEB-のセッションはサーバ側で会話本文を保存しない(worker.ts logResearchTurn)。
+  const webPid=(!EXHIBIT&&!researchMode)?('WEB-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8)):'';
   if(EXHIBIT&&EXHIBIT.brain==='offline'){
     d=offlineStart(); // 展示のオフライン固定運転(ネット無し会場・リハーサル用)
   }else{
     try{
       const startBody={turnstileToken};
       if(researchMode)startBody.participantId=researchParticipantId;
+      else if(exhibitPid)startBody.participantId=exhibitPid;
+      else if(webPid)startBody.participantId=webPid;
       const r=await fetch('/start',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(startBody),signal:AbortSignal.timeout(9000)});
       const j=await safeJson(r);
@@ -1270,8 +1392,9 @@ async function start(){
     }
     if(!d)d=offlineStart(); // 展示: サーバに届かない/枠切れでも、内蔵の綾香で止めない
   }
+  if(EXHIBIT&&d)d=Object.assign({},d,{narration:EX_OPENING}); // 展示は導入を短く(情報だけ手早く)
   history=[];stage=0;turns=0;opened=false;done=false;letterText=null;logEntries=[];logBody.innerHTML='';
-  activeParticipantId=researchMode?researchParticipantId:'';
+  activeParticipantId=researchMode?researchParticipantId:(exhibitPid||'');
   clearState();saveState();
   $('intro').classList.add('gone');
   fx.start();ambient.sync();
@@ -1287,6 +1410,7 @@ function hideControls(){$('controls').classList.add('hidden')}
 
 async function turn(text){
   if(busy||!token||done)return;busy=true;busySince=Date.now();
+  const myGen=EXHIBIT?exGen:0; // この処理が始まった時点の展示セッション世代(exReset()を跨いだ古い続きを検知する)
   micAutoSend=false;stopSpeechInput();
   lastActivity=Date.now();
   if(text)fx.eat(text);
@@ -1319,12 +1443,18 @@ async function turn(text){
       }
     }
     showThinking(false);
+    if(EXHIBIT&&myGen!==exGen)return; // 応答を待つ間にリセットされていた(古い来場者の続き)→なにもせず終える
     history=history.concat({role:'user',content:spoken},{role:'assistant',content:d.narration||''});
     turns=history.filter(m=>m.role==='user').length;stage=d.stage||stage;opened=!!d.opened;done=!!d.done;
     saveState();
     await present(d);
-    if(done){await ending();saveState()}
-    else{showControls('');refreshChips();autoListen()}
+    if(EXHIBIT&&myGen!==exGen)return;
+    if(done){
+      busySince=0; // 結末の演出・休止は正常に長い(数分)ので、以後は見張り係のスタック検知の対象から外す
+      await ending();saveState();
+    }else{
+      showControls('');refreshChips();autoListen();
+    }
   }catch(_){
     showThinking(false);
     await setKP('……こえが、とおい。(通信に失敗しました。もう一度どうぞ)');
@@ -1444,19 +1574,65 @@ $('surveyform').addEventListener('submit',async e=>{
 // ═══ 展示モード(?mode=exhibit): 実物の扉のインスタレーション ═══
 // 流れ: 設営者が「展示をはじめる」を押す(音声解禁+全画面) → 待ち受け(マイク常時)
 //       → 来場者が話しかけると自動でセッション開始 → 声で会話 → 結末 or 立ち去りで自動リセット
+const EX_ATTRACT_TEXT='声をかけるか、したのことばに、ふれてみてください。——むこうで、だれかが待っています';
 function exAttract(){
   if(!EXHIBIT)return;
   exState='attract';
+  document.body.classList.add('exhibit-attract-controls');
   micAutoHandler=exBegin;
   kp.classList.add('attractpulse');
+  exScheduleCallout();
+  // 来場者ごとに音量を最大へ戻す(運転席パネルで誰かが下げても、次の来場者には引き継がない)
+  volume=1;store.set('vol',volume);try{$('vol').value=100}catch(_){}
+  exShortHits=0;
+  // 高い声などを音声認識が拾えない時も、最初から同じ入口を選べるようにする
+  showControls('声でも、ことばのボタンでも、だいじょうぶです');
+  refreshChips();
   if(exTouch){ // タッチ運転: 声のかわりに、ことばのボタンと入力欄で迎える
     setKP('とびらの前へ、どうぞ。——したの言葉をえらんで、話しかけてみてください');
     showControls('ことばを、えらんでみてください。じぶんの言葉でも、だいじょうぶ');
     refreshChips();
   }else{
-    setKP('とびらの前に立って、話しかけてみてください。——むこうで、だれかが待っています');
+    setKP(EX_ATTRACT_TEXT);
     try{startSpeechInput(true)}catch(_){}
   }
+}
+// ── 待ち受けの呼びかけ: 誰も話しかけていない間、ときどき声を出して話しかけるきっかけをつくる ──
+const EX_CALLOUT_LINES=['ねぇ、だれか、いるの?','わたしは、ここだよ','……おなかが、すいたな','おしゃべり、しようよ'];
+let exCalloutLast=-1, exNextCalloutAt=0;
+function exScheduleCallout(){ // 次の呼びかけ時刻を、ばらつきを持たせて予約する
+  const lo=(EXHIBIT.calloutMin||20)*1000, hi=(EXHIBIT.calloutMax||40)*1000;
+  exNextCalloutAt=Date.now()+lo+Math.random()*Math.max(0,hi-lo);
+}
+function pickCalloutLine(){
+  const pool=EX_CALLOUT_LINES.map((_,i)=>i).filter(i=>i!==exCalloutLast);
+  const idx=pool[Math.floor(Math.random()*pool.length)];
+  exCalloutLast=idx;
+  return EX_CALLOUT_LINES[idx];
+}
+let exCalloutRunning=false; // 呼びかけの多重発火防止(TTSが予約間隔より長引いた時のガード)
+async function exMaybeCallout(){
+  if(!EXHIBIT||exState!=='attract'||busy||exCalloutRunning)return;
+  if(Date.now()<exNextCalloutAt)return;
+  exScheduleCallout();
+  exCalloutRunning=true;
+  const myGen=exGen;
+  try{
+    const line=pickCalloutLine();
+    if(exTouch){ // タッチ運転(声が使えない環境)は文字だけ、すこし長めに見せて元の案内に戻す
+      await setKP(line);
+      await sleep(2200);
+      if(myGen===exGen&&exState==='attract')setKP('とびらの前へ、どうぞ。——したの言葉をえらんで、話しかけてみてください');
+      return;
+    }
+    micAutoSend=false;stopSpeechInput(); // 自分の声をマイクが拾わないよう、呼びかけの間だけ聞くのを止める
+    await setKP(line);
+    await speak(line);
+    if(myGen===exGen&&exState==='attract'){ // まだ誰も話しかけていなければ、案内文言に戻してマイクを再開
+      setKP(EX_ATTRACT_TEXT);
+      try{startSpeechInput(true)}catch(_){}
+    }
+  }finally{exCalloutRunning=false}
 }
 // 音声認識が連続で死んだ時(ネット断・マイク不許可): 展示をタッチ運転に切り替えて止めない
 function exSrTrouble(){
@@ -1470,19 +1646,37 @@ function exSrTrouble(){
 async function exBegin(text){
   if(!EXHIBIT||exState!=='attract'||busy)return;
   const core=String(text||'').replace(/[\s、。，,．.…‥!?！？~〜ー]/g,'');
-  if(core.length<2)return; // 物音などの誤検知は無視(見張り係が聞き直す)
+  if(core.length<2){
+    if(++exShortHits>=2){
+      exShortHits=0;
+      setKP('……ちいさな声も、ひろえないことがあるんです。したのことばに、ふれてみてください');
+      showControls('したのことばに、ふれてみてください');
+      refreshChips();
+    }
+    return; // 物音などの誤検知は会話に入れず、続いた時だけボタンへ案内する
+  }
+  exShortHits=0;
+  document.body.classList.remove('exhibit-attract-controls');
   exState='play';
+  const myGen=exGen;
+  lightSpike=0;exLightAlarmed=false; // 待ち受け中の環境光の揺らぎ・前回セッションの警戒済みフラグを持ち越さない
+  volume=1;store.set('vol',volume);try{$('vol').value=100}catch(_){} // 会話が始まる瞬間にも音量を最大へ(待ち受け中に下げられていても)
   kp.classList.remove('attractpulse');
   lastActivity=Date.now();
   micAutoHandler=v=>turn(v);
   await start();
+  if(myGen!==exGen)return; // 起動待ちの間にリセットされていたら、なにもしない
   if(!token){
     exState='cooldown';
     await setKP('扉が、まだ、うまくひらきません。すこし待って、また話しかけてください');
     setTimeout(exAttract,30000);
     return;
   }
-  await turn(text);
+  // 最初の一声は「呼びかけ(起動の合図)」として扱い、ターンとしては送らない(2026-07-22)。
+  // 声をかける→オープニング定型文→その古い一声への返答、というラリーが不自然だったため、
+  // 定型文(=「誰か、いるんですね」と気づく台詞)が終わったところで音声取得に入り、
+  // そこからを本当の会話にする。マイク再開と言葉ボタンはstart()末尾のautoListen/showControlsが開く。
+  lastActivity=Date.now(); // 立ち去り判定は、マイクが開いた時点から数え直す
 }
 async function exFarewell(){ // 来場者が立ち去った(無応答)とき
   if(!EXHIBIT||exState!=='play'||busy)return;
@@ -1494,24 +1688,146 @@ async function exFarewell(){ // 来場者が立ち去った(無応答)とき
   await sleep(1600);
   exReset();
 }
+// ── 光センシング(カメラの明るさ変化): 実物の扉が本当に開いた瞬間を検知して「まぶしい」と反応する ──
+// Safariに照度センサーAPIは無いため、カメラ映像の平均輝度を継続監視して代用する。
+// 権限拒否/非対応/箱の構造上カメラが使えない環境では、この機能なしで従来どおり動く(必須ではない)。
+let cameraOk=false, lightVideo=null, lightStream=null, lightCanvas=null, lightCtx=null, lightBaseline=null, lightSpike=0, lightTimer=null, lightFailStreak=0;
+async function requestCameraPermission(){
+  let stream=null;
+  try{
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return false;
+    const facing=(EXHIBIT&&EXHIBIT.cam)||'environment';
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:160},height:{ideal:120}},audio:false});
+    lightVideo=document.createElement('video');
+    lightVideo.muted=true;lightVideo.playsInline=true;lightVideo.srcObject=stream;
+    await lightVideo.play().catch(()=>{});
+    lightCanvas=document.createElement('canvas');lightCanvas.width=20;lightCanvas.height=15;
+    lightCtx=lightCanvas.getContext('2d',{willReadFrequently:true});
+    if(!lightCtx){stream.getTracks().forEach(t=>t.stop());return false} // コンテキストが取れなければ、取得済みのカメラを解放しておく
+    lightStream=stream;
+    return true;
+  }catch(_){
+    if(stream)stream.getTracks().forEach(t=>t.stop());
+    return false;
+  }
+}
+function startLightSensing(){
+  if(cameraOk||!lightVideo||!lightCtx)return;
+  cameraOk=true;lightFailStreak=0;
+  lightTimer=setInterval(()=>{
+    try{
+      lightCtx.drawImage(lightVideo,0,0,20,15);
+      const d=lightCtx.getImageData(0,0,20,15).data;
+      let sum=0;
+      for(let i=0;i<d.length;i+=4)sum+=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+      const avg=sum/(d.length/4);
+      // 基準値をゆっくり追従(箱の中の常時の暗さに慣れる)。明るくなる方向の急な逸脱だけを「扉が開いた」とみなす
+      lightBaseline=lightBaseline==null?avg:lightBaseline+(avg-lightBaseline)*0.02;
+      const delta=avg-lightBaseline;
+      if(delta>lightSpike)lightSpike=delta;
+      lightFailStreak=0;
+    }catch(_){
+      // カメラ映像が取れない状態(トラック停止・バックグラウンド復帰の失敗等)が続いたら、光反応を諦めて監視を止める
+      if(++lightFailStreak>=10){clearInterval(lightTimer);lightTimer=null;cameraOk=false}
+    }
+  },400);
+}
+// タブがバックグラウンドから復帰した時、映像が止まっていれば再生を試みる(iOSはバックグラウンドでカメラを止めることがある)
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&lightVideo&&lightVideo.paused){
+    lightVideo.play().catch(()=>{});
+  }
+});
+// しきい値を超える明るさの上昇が来たらtrueで早期解決。来なければtimeoutでfalse
+function waitForLight(timeoutMs){
+  const threshold=(EXHIBIT&&EXHIBIT.lightThresh)||18;
+  return new Promise(res=>{
+    lightSpike=0;
+    const t0=Date.now();
+    const iv=setInterval(()=>{
+      if(!cameraOk){clearInterval(iv);res(false);return}
+      if(lightSpike>=threshold){clearInterval(iv);res(true);return}
+      if(Date.now()-t0>timeoutMs){clearInterval(iv);res(false)}
+    },150);
+  });
+}
 async function exFinish(){ // 結末(扉がひらいた)あと、余韻をおいて次の来場者へ
   exState='fin';
-  // 全て思い出した別れのあと: 風鈴の音とともに、置き手紙のひとこと(KASO指定2026-07-19)。
-  // 会場ではiPadの横に印刷した手紙を置いておき、来場者が持ち帰れるようにする
+  const myGen=exGen;
+  // 全て思い出した別れのあと: 風鈴の音とともに、置き手紙のひとこと(KASO指定・「あそびかた」表記と統一)。
+  // 会場では箱の扉のむこうに印刷した手紙(おくりもの)を入れておき、来場者が扉を開けて持ち帰る
   await sleep(900);
+  if(myGen!==exGen)return;
   try{ambient.chime()}catch(_){}
-  const letterLine='よかったら、あなたのために、お手紙を書きました。もらってください。……じゃあね';
+  const letterLine='扉のむこうに、あなたへのおくりものを、のこしました。扉を開けて、もらってください。……じゃあね';
   await setKP(letterLine);
   addLog('girl',letterLine,false);
   await speak(letterLine);
+  if(myGen!==exGen)return;
   await sleep(1400);
+  if(myGen!==exGen)return;
   await setKP('— 扉は、ひらきました —');
-  await sleep(EXHIBIT.rest*1000);
+  // この時点で光センサーの基準をリセットする(設営時の物音・待ち受け中の誤検知を、結末の反応に持ち越さないため)
+  lightSpike=0;
+  // ここから rest(既定3分)のあいだ、マイクは開かない(連れ同士が感想を話せる時間)。
+  // 光センサーが使えれば、実物の扉が本当に開いて明るくなった瞬間だけ、一度だけ反応する
+  await restWithDoorLightReaction(EXHIBIT.rest*1000,myGen);
+  if(myGen!==exGen)return; // すでに次の来場者のセッションが始まっていたら、ここでのリセットは行わない
   exReset();
 }
+const EX_DAZZLE_LINES=['……まぶしい','……あ、まぶしい。……ひかりだ','わ……まぶしい。ひさしぶりの、そとの光'];
+// ── 早すぎる扉あけへの警戒: まだ思い出しきる前(stage5未満)に、光センサーが実物の扉が開いたのを検知した時の反応 ──
+// (KASO指定2026-07-24)結末を迎える前に扉が開くのは物語上「まだ早い」演出。会話は止めず、驚きの一言だけ挟む
+const EX_PREMATURE_LIGHT_LINES=[
+  '……まぶしい……! まだ、開かないでください。わたし、消えちゃう……',
+  '……あ、光。……お願い、まだです。ぜんぶ思い出す前に、扉を開けないで',
+  '……まぶしい。……まだ、なんです。いま開いたら、わたし、消えてしまいます',
+];
+let exLightAlarmRunning=false; // 光の警戒台詞の多重発火防止
+let exLightAlarmed=false; // このセッションで一度警戒したか(扉が開いたままでも連呼しない・exBegin()でリセット)
+async function exMaybeLightAlarm(){
+  if(!EXHIBIT||!cameraOk||exState!=='play'||busy||exLightAlarmRunning||exLightAlarmed||done||opened||stage>=5)return;
+  const threshold=(EXHIBIT&&EXHIBIT.lightThresh)||18;
+  if(lightSpike<threshold){lightSpike=0;return} // 閾値未満の揺らぎは持ち越さず、次の見張りサイクルのためにクリアする
+  lightSpike=0;
+  exLightAlarmRunning=true;exLightAlarmed=true; // 一度だけの演出(扉が開いたままでも以後は反応しない)
+  const myGen=exGen;
+  // busyを確保して、警戒発話中に通常のturn()や立ち去り判定(exFarewell)が割り込まないようにする
+  busy=true;busySince=Date.now();
+  hideControls();
+  micAutoSend=false;stopSpeechInput(); // 自分の声をマイクが拾わないよう、発話中だけ聞くのを止める
+  try{
+    const line=EX_PREMATURE_LIGHT_LINES[Math.floor(Math.random()*EX_PREMATURE_LIGHT_LINES.length)];
+    await setKP(line);addLog('girl',line,false);
+    await speak(line);
+    if(myGen!==exGen)return;
+    lastActivity=Date.now();
+    if(exState==='play')showControls('');refreshChips(); // 会話は止めず、そのまま続きを聞く
+  }finally{
+    exLightAlarmRunning=false;
+    if(myGen===exGen){busy=false;busySince=0;if(exState==='play')autoListen()}
+  }
+}
+async function restWithDoorLightReaction(restMs,myGen){
+  if(!cameraOk){await sleep(restMs);return}
+  const t0=Date.now();
+  let reacted=false;
+  while(Date.now()-t0<restMs){
+    if(myGen!==exGen)return; // 待っている間にリセットされていたら、それ以上なにもしない
+    if(!reacted&&lightSpike>=((EXHIBIT&&EXHIBIT.lightThresh)||18)){
+      reacted=true;lightSpike=0;
+      const line=EX_DAZZLE_LINES[Math.floor(Math.random()*EX_DAZZLE_LINES.length)];
+      await setKP(line);addLog('girl',line,false);
+      await speak(line);
+      if(myGen!==exGen)return;
+    }
+    await sleep(200);
+  }
+}
 function exReset(){
+  exGen++;
   micAutoSend=false;stopVoicePlayback();stopSpeechInput();
-  token=null;history=[];turns=0;opened=false;done=false;busy=false;letterText=null;
+  token=null;history=[];turns=0;opened=false;done=false;busy=false;busySince=0;letterText=null;
   logEntries=[];logBody.innerHTML='';clearState();
   document.body.classList.remove('open');
   setBeat(0);setDots(0);setMood('calm');
@@ -1522,6 +1838,7 @@ if(EXHIBIT){
   $('intro').classList.add('gone');
   $('engineline').textContent='展示モード';
   voiceOn=true;fastText=false;hfOn=!!SR;paintVoiceSw();paintHfSw();
+  volume=1;store.set('vol',volume);try{$('vol').value=100}catch(_){} // 展示は常に最大音量で運転(運転席パネルで下げられても後述exAttractで毎回戻す)
   // 音の風景: 既定は「鈴だけ」(思い出した瞬間の鈴+扉の鐘。風ノイズ・常時風鈴なし)。amb=on=全部 / amb=off=無音
   if(EXHIBIT.amb==='off'){ambient.setPref(false)}
   else if(EXHIBIT.amb==='on'){ambient.setPref(true)}
@@ -1534,6 +1851,7 @@ if(EXHIBIT){
     document.body.appendChild(credit);
   }
   const gate=$('exhibitgate');gate.classList.remove('gone');
+  let exAudioCheckText='・AudioContext: 「展示をはじめる」のタップ後に確認します';
   (async()=>{ // 設営者向けセルフチェック
     const lines=[];
     lines.push(SR?'✓ 音声認識: 使えます(※ネット接続が必要。切れたら自動でタッチ運転へ)':'△ 音声認識: 非対応 → ことばのボタン+文字入力で動きます');
@@ -1555,6 +1873,8 @@ if(EXHIBIT){
         lines.push(r.ok?('✓ ローカル音声合成: '+EXHIBIT.ttsbase):'△ ローカル音声合成: 見つかりません(この端末の内蔵音声で話します)')}
       catch(_){lines.push('△ ローカル音声合成: 見つかりません(この端末の内蔵音声で話します)')}
     }
+    lines.push(exAudioCheckText);
+    lines.push((navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)?'・光センサー(カメラ): 対応(「展示をはじめる」で許可を求めます)':'△ 光センサー: 非対応(扉が開いても反応しません)');
     lines.push('build '+BUILD+(('speechSynthesis'in window)?'・声の候補が読み込まれ次第つかいます':''));
     $('exhibitchecks').innerHTML=lines.map(escapeText).join('<br>');
   })();
@@ -1568,7 +1888,7 @@ if(EXHIBIT){
   };
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')exGrabWake()});
   $('exhibitstart').onclick=async()=>{
-    gate.classList.add('gone');
+    const myGen=exGen;
     // ★音声の解禁はタップ直後・全画面より前に行う(iOSはrequestFullscreenがユーザー操作権を
     //   消費するため、あとから話そうとすると黙って失敗する)。cancelも挟まない。
     try{if('speechSynthesis'in window){
@@ -1582,9 +1902,13 @@ if(EXHIBIT){
       const ap=aivisAudio.play();if(ap&&ap.catch)ap.catch(()=>{});
     }catch(_){}
     // WebAudio再生経路(保険)のContextも解禁
+    let voiceResumePromise=Promise.resolve();
     try{const AC=window.AudioContext||window.webkitAudioContext;
-      if(AC){voiceCtx=voiceCtx||new AC();if(voiceCtx.state==='suspended')voiceCtx.resume().catch(()=>{})}}catch(_){}
+      if(AC){voiceCtx=voiceCtx||new AC();if(voiceCtx.state==='suspended')voiceResumePromise=voiceCtx.resume().catch(()=>{})}}catch(_){}
     ambient.sync(); // 鈴のAudioContextの解禁も操作の中で
+    // 光センサー(カメラ)は、このタップの中で許可を求める。
+    // 拒否/非対応でも展示は普通に進む(センシングが無いだけ)。結果を待たず並行で進める
+    requestCameraPermission().then(ok=>{if(ok)startLightSensing()}).catch(()=>{});
     // 全画面要求が環境によっては固まる/失敗するため、1.5秒で見切って必ず展示を始める
     // (iPad Safariは旧OSだとwebkit接頭辞のみ。全画面にならなくても「アクセスガイド」で固定できる)
     const root=document.documentElement, fsReq=root.requestFullscreen||root.webkitRequestFullscreen;
@@ -1592,11 +1916,23 @@ if(EXHIBIT){
       Promise.resolve(fsReq&&fsReq.call(root)).catch(()=>{}),
       new Promise(r=>setTimeout(r,1500)),
     ])}catch(_){}
+    if(myGen!==exGen)return;
+    await Promise.race([voiceResumePromise,new Promise(r=>setTimeout(r,400))]);
+    if(myGen!==exGen)return;
+    exAudioCheckText=(voiceCtx&&voiceCtx.state==='running')
+      ?'✓ AudioContext: running（クラウド声を再生できます）'
+      :'△ AudioContext: '+(voiceCtx?voiceCtx.state:'非対応')+'（画面タップで再解禁を試します）';
+    const check=$('exhibitchecks');
+    check.innerHTML=check.innerHTML.replace(/・AudioContext:[^<]*/,escapeText(exAudioCheckText));
+    gate.classList.add('gone');
     exGrabWake();fx.start();
     exAttract();
   };
   // それでも解禁に失敗した場合の保険: 展示画面のどこかを触った時に取り直す
   document.addEventListener('pointerup',()=>{
+    const myGen=exGen;
+    recoverVoiceContext(myGen).catch(()=>{}); // 内蔵声へ落ちていなくても、来場者のタップを再解禁の機会にする
+    ambient.resume().catch(()=>{});
     if(!ttsBlocked)return;
     ttsBlocked=false;
     try{const u=new SpeechSynthesisUtterance('　');u.lang='ja-JP';u.volume=0;lastUtterance=u;speechSynthesis.speak(u)}catch(_){}
@@ -1608,16 +1944,30 @@ if(EXHIBIT){
     if(exTaps>=5){
       exTaps=0;
       const on=document.body.classList.toggle('exhibit-ops');
-      if(on&&!busy)showControls('運転席: 文字入力で代行できます'); // 待ち受け中でも入力欄を押せるように
+      if(on&&!busy)showControls('運転席: 音声経路 '+lastVoiceRoute+' ／ クラウド連続失敗 '+cloudTtsFailures+'回'); // 現地で声の劣化に気づけるように
     }
   });
   // 見張り係: 待ち受けのマイクが落ちていたら立て直し / 立ち去りを検知してお別れ /
   //          画面ロック抑止の取り直し / turn処理のスタックを検知して初期化(無人運転の自己回復)
-  setInterval(()=>{
+  setInterval(async()=>{
     if(document.visibilityState!=='visible')return;
+    const myGen=exGen;
     if(!exWakeLock)exGrabWake();
+    // iOSが長時間の無操作で音声セッションを休止しても、展示を止めずに定期復帰する
+    if(!voiceRecoveryRunning){
+      voiceRecoveryRunning=true;
+      try{
+        if(voiceCtx&&voiceCtx.state==='suspended')await voiceCtx.resume().catch(()=>{});
+        if(myGen!==exGen)return;
+        await ambient.resume();
+        if(myGen!==exGen)return;
+        if(voiceCtx&&voiceCtx.state==='running'&&Date.now()-voiceKeepaliveAt>45000)playVoiceKeepalive();
+      }finally{voiceRecoveryRunning=false}
+    }
     if(busy&&busySince&&Date.now()-busySince>90000){busy=false;busySince=0;exReset();return}
     if(exState==='attract'&&!exTouch&&!micRecognition&&!busy){try{startSpeechInput(true)}catch(_){}}
+    if(exState==='attract'&&!busy)exMaybeCallout(); // 待ち受け中の呼びかけ(時刻が来ていなければ内部で早期return)
+    if(exState==='play'&&!busy)exMaybeLightAlarm(); // 記憶が戻る前に扉が開いた時の警戒(閾値未満なら内部で早期return)
     if(exState==='play'&&token&&!done&&!busy&&Date.now()-lastActivity>EXHIBIT.idle*1000)exFarewell();
   },4000);
 }
